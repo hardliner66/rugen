@@ -6,6 +6,7 @@ edition.workspace = true
 repository.workspace = true
 license-file.workspace = true
 authors.workspace = true
+readme = "README.md"
 
 [dependencies]
 rune = "0.14.1"
