@@ -30,7 +30,7 @@ jobs:
             archive_ext: .zip
 
     env:
-      BIN_NAME: rugen
+      BIN_NAME: rugen-cli
 
     steps:
       - name: Checkout
