@@ -1,5 +1,6 @@
 [package]
 name = "rugen-cli"
+description = "A command-line tool for generating random data based on a data description written in Rune."
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
