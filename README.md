@@ -60,8 +60,6 @@ You probably also noticed, that all the type information is gone. The reason for
 Especially if you always use a lower and an upper limit in a range (`lower_limit..upper_limit`). The tool itself also currently only outputs
 data as JSON, so there is no need to have the limits from the ranges *AND* the limits from the data type at the same time.
 
-But 
-
 ```rs
 use rugen::*;
 
