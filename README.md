@@ -2,6 +2,38 @@
 
 The data generation dsl used in [mockbox](https://github.com/hardliner66/mockbox).
 
+## Installation CLI
+
+### Pre-Built Binaries (via [cargo-binstall](https://github.com/cargo-bins/cargo-binstall))
+
+```sh
+cargo binstall rugen-cli
+```
+
+### Pre-Built Binaries (manual download)
+
+You can download pre-built binaries from the [latest release](https://github.com/hardliner66/rugen/releases).
+
+### From Source
+
+1. Clone the repository
+2. Build the project:
+
+```bash
+cargo install rugen-cli
+```
+
+### As Library
+
+`RuGen` also provides a module that can be installed into your own `Rune` vm. To use it go to your project and run:
+
+```sh
+cargo add rugen
+```
+
+For an example on how set up `RuGen` with `Rune`, take a look at the how the CLI does it:
+[crates/rugen-cli/src/main.rs](./crates/rugen-cli/src/main.rs).
+
 ## How it works
 
 `RuGen` uses the [Rune](https://rune-rs.github.io/) scripting language to build a an internal
@@ -52,7 +84,7 @@ To try this example locally, make sure you have rugen-cli installed, then either
 
 Now, lets have a look at the implicit way of describing data. Normally, you would use the `describe` function like in the example before,
 but because our CLI is only meant execute data descriptions, we can just return a rune object and the CLI will automatically call `describe` on it
-for us. Just keep in mind that you when you use rugen as a library, you either need to add the `describe` call to your rune scripts or call it
+for us. Just keep in mind that you when you use `RuGen` as a library, you either need to add the `describe` call to your rune scripts or call it
 yourself when you get the result of the script execution.
 
 As you can see below, most of the functions from the first example are gone. This is because we know what type of almost every value and
