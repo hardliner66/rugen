@@ -9,7 +9,7 @@ repository = "https://github.com/hardliner66/rugen"
 readme = "README.md"
 license-file = "LICENSE"
 authors = ["Steve Biedermann <hardliner66@gmail.com>"]
-version = "0.5.0"
+version = "0.5.1"
 
 [profile.dev.package."*"]
 opt-level = 3
