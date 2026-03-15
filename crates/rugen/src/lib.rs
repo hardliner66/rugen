@@ -54,12 +54,12 @@ pub enum DataDescription {
     Bool,
     Just(Value),
     UInt {
-        min: u128,
-        max: u128,
+        min: u64,
+        max: u64,
     },
     Int {
-        min: i128,
-        max: i128,
+        min: i64,
+        max: i64,
     },
     Char {
         min: char,
@@ -187,20 +187,20 @@ fn bool() -> DataDescription {
 
 fn range_impl(min: &Value, max: &Value) -> DataDescription {
     match min {
-        min if min.as_integer::<u128>().is_ok() => {
-            let Ok(min) = min.as_integer::<u128>() else {
+        min if min.as_integer::<u64>().is_ok() => {
+            let Ok(min) = min.as_integer::<u64>() else {
                 return DataDescription::Error(RuGenError::InvalidRangeStart);
             };
-            let Ok(max) = max.as_integer::<u128>() else {
+            let Ok(max) = max.as_integer::<u64>() else {
                 return DataDescription::Error(RuGenError::InvalidRangeEnd);
             };
             DataDescription::UInt { min, max }
         }
-        min if min.as_integer::<i128>().is_ok() => {
-            let Ok(min) = min.as_integer::<i128>() else {
+        min if min.as_integer::<i64>().is_ok() => {
+            let Ok(min) = min.as_integer::<i64>() else {
                 return DataDescription::Error(RuGenError::InvalidRangeStart);
             };
-            let Ok(max) = max.as_integer::<i128>() else {
+            let Ok(max) = max.as_integer::<i64>() else {
                 return DataDescription::Error(RuGenError::InvalidRangeEnd);
             };
             DataDescription::Int { min, max }
@@ -239,12 +239,12 @@ fn char(min: char, max: char) -> DataDescription {
 }
 
 #[rune::function]
-fn uint(min: u128, max: u128) -> DataDescription {
+fn uint(min: u64, max: u64) -> DataDescription {
     DataDescription::UInt { min, max }
 }
 
 #[rune::function]
-fn int(min: i128, max: i128) -> DataDescription {
+fn int(min: i64, max: i64) -> DataDescription {
     DataDescription::Int { min, max }
 }
 
