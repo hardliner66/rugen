@@ -15,9 +15,12 @@ objects, vectors and ranges, and the library takes care of the rest.
 Of course it's also possible to be explicit about it, so you can find your own perfect balance between
 explicitness and magic.
 
+I would highly recommend using the implicit api, because there is less clutter and less functions to remember.
+
 ## Explicit Example
 
-First, lets have a look at the implicit way of describing your data.
+First, lets have a look at the explicit way of describing your data. This should give you a bit of how things work
+and you see how the implicit api works under the hood (at least conceptually).
 
 ```rs
 use rugen as r;
@@ -42,6 +45,8 @@ You start a description with `describe`, then you use the appropriate functions 
 `uint` evaluates to a random unsigned integer, that's at least as big as the first number you pass and at most as big as the last number minus one.
 
 Each part has its own function, making it perfectly clear what kind of data you can expect.
+
+To try this example locally, make sure you have rugen-cli installed, then either clone the repository or download the fire from [examples/explicit.rn](./examples/explicit.rn), then you can run it with `rugen path/to/explicit.rn`.
 
 ## Implicit Example
 
@@ -78,6 +83,16 @@ pub fn main() {
     }
 }
 ```
+
+As you can see, there is way less noise from helper functions. Behind the scenes it still gets packaged into the same data description,
+just with less work involved. The implicit api also supports half open ranges (`..<max>` or `<min>..`), which you can use when there only is a
+upper or lower limit, but not both. This is currently not implemented in the explicit api.
+
+There is also the full range (`..`) which would give you every value from lowest to highest possible,
+but is currently not implemented as well. The reason for that is, that there is no way to know if the type of the full range is signed, unsigned
+or a float, so we also can't determine which numbers to use.
+
+To try this example locally, make sure you have rugen-cli installed, then either clone the repository or download the fire from [examples/implicit.rn](./examples/implicit.rn), then you can run it with `rugen path/to/implicit.rn`.
 
 ## API
 
