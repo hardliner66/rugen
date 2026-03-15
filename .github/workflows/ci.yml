@@ -30,7 +30,7 @@ jobs:
             archive_ext: .zip
 
     env:
-      BIN_NAME: rugen-cli
+      BIN_NAME: rugen
 
     steps:
       - name: Checkout
@@ -40,7 +40,7 @@ jobs:
         run: rustup target add ${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} --bin ${{ env.BIN_NAME }}
+        run: cargo build --release --target ${{ matrix.target }} -p rugen-cli --bin ${{ env.BIN_NAME }}
 
       - name: Compute version
         shell: bash
@@ -50,7 +50,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          PKG_DIR="${BIN_NAME}-${{ matrix.target }}-v${VERSION}"
+          PKG_DIR="${BIN_NAME}-cli-${{ matrix.target }}-v${VERSION}"
           mkdir "$PKG_DIR"
           cp "target/${{ matrix.target }}/release/${BIN_NAME}" "$PKG_DIR/"
           tar czf "${PKG_DIR}.tgz" "$PKG_DIR"
@@ -59,7 +59,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $pkgDir = "${env:BIN_NAME}-${{ matrix.target }}-v${env:VERSION}"
+          $pkgDir = "${env:BIN_NAME}-cli-${{ matrix.target }}-v${env:VERSION}"
           New-Item -ItemType Directory -Path $pkgDir | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/${env:BIN_NAME}.exe" "$pkgDir/"
           Compress-Archive -Path $pkgDir -DestinationPath "$pkgDir.zip"
@@ -71,4 +71,4 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            ${{ env.BIN_NAME }}-${{ matrix.target }}-v${{ env.VERSION }}${{ matrix.archive_ext }}
+            ${{ env.BIN_NAME }}-cli-${{ matrix.target }}-v${{ env.VERSION }}${{ matrix.archive_ext }}
