@@ -14,7 +14,7 @@ name = "rugen"
 path = "src/main.rs"
 
 [dependencies]
-rugen = { version = "0.4.0", path = "../rugen" }
+rugen = { version = "0.5.0", path = "../rugen" }
 anyhow = "1.0.102"
 clap = { version = "4.0.32", features = ["derive"] }
 rune = "0.14.1"
