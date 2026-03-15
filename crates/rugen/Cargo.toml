@@ -1,0 +1,15 @@
+[package]
+name = "rugen"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license-file.workspace = true
+authors.workspace = true
+
+[dependencies]
+rune = "0.14.1"
+rand = "0.10.0"
+thiserror = "2.0.18"
+
+[features]
+allow_empty = []

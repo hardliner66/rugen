@@ -1,0 +1,19 @@
+[package]
+name = "rugen-cli"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license-file.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "rugen"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.0.32", features = ["derive"] }
+rune = "0.14.1"
+rugen = { version = "0.1.0", path = "../rugen" }
+rune-modules = { version = "0.14.1", features = ["full"] }
+serde_json = "1.0.149"
