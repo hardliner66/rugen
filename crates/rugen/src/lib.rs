@@ -39,18 +39,22 @@ pub enum DataDescription {
     UInt {
         min: u64,
         max: u64,
+        inclusive: bool,
     },
     Int {
         min: i64,
         max: i64,
+        inclusive: bool,
     },
     Char {
         min: char,
         max: char,
+        inclusive: bool,
     },
     Float {
         min: f64,
         max: f64,
+        inclusive: bool,
     },
     String {
         len: Box<DataDescription>,
@@ -79,7 +83,7 @@ fn bool() -> DataDescription {
     DataDescription::Bool
 }
 
-fn range_impl(min: &Value, max: &Value) -> Result<DataDescription, RuGenError> {
+fn range_impl(min: &Value, max: &Value, inclusive: bool) -> Result<DataDescription, RuGenError> {
     match min {
         min if min.as_integer::<u64>().is_ok() => {
             let min = min
@@ -89,7 +93,11 @@ fn range_impl(min: &Value, max: &Value) -> Result<DataDescription, RuGenError> {
                 .as_integer::<u64>()
                 .map_err(|_| RuGenError::InvalidRangeEnd)?;
 
-            Ok(DataDescription::UInt { min, max })
+            Ok(DataDescription::UInt {
+                min,
+                max,
+                inclusive,
+            })
         }
         min if min.as_integer::<i64>().is_ok() => {
             let min = min
@@ -98,17 +106,29 @@ fn range_impl(min: &Value, max: &Value) -> Result<DataDescription, RuGenError> {
             let max = max
                 .as_integer::<i64>()
                 .map_err(|_| RuGenError::InvalidRangeEnd)?;
-            Ok(DataDescription::Int { min, max })
+            Ok(DataDescription::Int {
+                min,
+                max,
+                inclusive,
+            })
         }
         min if min.as_float().is_ok() => {
             let min = min.as_float().map_err(|_| RuGenError::InvalidRangeStart)?;
             let max = max.as_float().map_err(|_| RuGenError::InvalidRangeEnd)?;
-            Ok(DataDescription::Float { min, max })
+            Ok(DataDescription::Float {
+                min,
+                max,
+                inclusive,
+            })
         }
         min if min.as_char().is_ok() => {
             let min = min.as_char().map_err(|_| RuGenError::InvalidRangeStart)?;
             let max = max.as_char().map_err(|_| RuGenError::InvalidRangeEnd)?;
-            Ok(DataDescription::Char { min, max })
+            Ok(DataDescription::Char {
+                min,
+                max,
+                inclusive,
+            })
         }
         _ => Err(RuGenError::UnsupportedType),
     }
@@ -117,7 +137,13 @@ fn range_impl(min: &Value, max: &Value) -> Result<DataDescription, RuGenError> {
 #[rune::function]
 #[expect(clippy::needless_pass_by_value)]
 fn range(min: Value, max: Value) -> Result<DataDescription, RuGenError> {
-    range_impl(&min, &max)
+    range_impl(&min, &max, false)
+}
+
+#[rune::function]
+#[expect(clippy::needless_pass_by_value)]
+fn range_inclusive(min: Value, max: Value) -> Result<DataDescription, RuGenError> {
+    range_impl(&min, &max, true)
 }
 
 fn value_min(value: &Value) -> Option<Value> {
@@ -163,15 +189,15 @@ impl TryFrom<&Value> for DataDescription {
                     .collect::<Result<_, _>>()?,
             ))
         } else if let Ok(range) = rune::from_value::<Range>(value) {
-            range_impl(&range.start, &range.end)
+            range_impl(&range.start, &range.end, false)
         } else if let Ok(range) = rune::from_value::<RangeInclusive>(value) {
-            range_impl(&range.start, &range.end)
+            range_impl(&range.start, &range.end, true)
         } else if let Ok(range) = rune::from_value::<RangeFrom>(value) {
             let max = value_max(&range.start).ok_or(RuGenError::UnsupportedType)?;
-            range_impl(&range.start, &max)
+            range_impl(&range.start, &max, true)
         } else if let Ok(range) = rune::from_value::<RangeTo>(value) {
             let min = value_min(&range.end).ok_or(RuGenError::UnsupportedType)?;
-            range_impl(&min, &range.end)
+            range_impl(&min, &range.end, false)
         } else if rune::from_value::<RangeFull>(value).is_ok() {
             Err(RuGenError::UnsupportedType)
         } else if let Ok(s) = rune::from_value::<Vec<Value>>(value) {
@@ -348,10 +374,42 @@ pub fn generate(this: &DataDescription) -> Result<Value, RuGenError> {
             Ok(rune::to_value(v)?)
         }
         DataDescription::Bool => Ok(rune::to_value(rng.random::<bool>())?),
-        DataDescription::UInt { min, max } => Ok(rune::to_value(rng.random_range(*min..*max))?),
-        DataDescription::Int { min, max } => Ok(rune::to_value(rng.random_range(*min..*max))?),
-        DataDescription::Char { min, max } => Ok(rune::to_value(rng.random_range(*min..*max))?),
-        DataDescription::Float { min, max } => Ok(rune::to_value(rng.random_range(*min..*max))?),
+        DataDescription::UInt {
+            min,
+            max,
+            inclusive,
+        } => Ok(rune::to_value(if *inclusive {
+            rng.random_range(*min..=*max)
+        } else {
+            rng.random_range(*min..*max)
+        })?),
+        DataDescription::Int {
+            min,
+            max,
+            inclusive,
+        } => Ok(rune::to_value(if *inclusive {
+            rng.random_range(*min..=*max)
+        } else {
+            rng.random_range(*min..*max)
+        })?),
+        DataDescription::Char {
+            min,
+            max,
+            inclusive,
+        } => Ok(rune::to_value(if *inclusive {
+            rng.random_range(*min..=*max)
+        } else {
+            rng.random_range(*min..*max)
+        })?),
+        DataDescription::Float {
+            min,
+            max,
+            inclusive,
+        } => Ok(rune::to_value(if *inclusive {
+            rng.random_range(*min..=*max)
+        } else {
+            rng.random_range(*min..*max)
+        })?),
         DataDescription::Weighted(items) => {
             let (_, v) = items.choose_weighted(&mut rng, |v| v.0)?;
             Ok(rune::to_value(generate(v))?)
@@ -393,6 +451,7 @@ pub fn module() -> Result<Module, ContextError> {
     let mut m = Module::with_item(["rugen"])?;
     m.ty::<DataDescription>()?;
     m.function_meta(range)?;
+    m.function_meta(range_inclusive)?;
     m.function_meta(just)?;
     m.function_meta(bool)?;
     m.function_meta(string)?;

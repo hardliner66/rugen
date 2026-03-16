@@ -135,6 +135,9 @@ rugen::bool() -> DataDescription;
 // creates a description that evaluates to a random Value between <min> and <max> (exclusive)
 rugen::range(min: rune::Value, max: rune::Value) -> DataDescription;
 
+// creates a description that evaluates to a random Value between <min> and <max> (inclusive)
+rugen::range_inclusive(min: rune::Value, max: rune::Value) -> DataDescription;
+
 // creates a description that evaluates to an alphanumeric string of length <len>
 rugen::string(len: DataDescription) -> DataDescription;
 
