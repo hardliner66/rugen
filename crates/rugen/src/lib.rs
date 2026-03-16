@@ -45,7 +45,7 @@ pub fn format_rune_script<P: AsRef<std::path::Path>>(
     let formatted = result?;
 
     let formatted = &formatted.first().unwrap().1;
-    std::fs::write(script, formatted)?;
+    std::fs::write(&script, formatted)?;
     Ok(())
 }
 

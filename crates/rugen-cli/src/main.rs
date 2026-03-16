@@ -18,6 +18,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Run a Rune script to generate data
     Gen {
         #[arg(short, long)]
         pretty: bool,
@@ -25,10 +26,8 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-
-    Format {
-        script: PathBuf,
-    },
+    /// Format a rune script
+    Format { script: PathBuf },
 }
 
 fn generate(pretty: bool, script: PathBuf, output: Option<PathBuf>) -> anyhow::Result<()> {
