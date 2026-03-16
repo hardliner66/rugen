@@ -12,6 +12,3 @@ readme.workspace = true
 rune = "0.14.1"
 rand = "0.10.0"
 thiserror = "2.0.18"
-
-[features]
-allow_empty = []

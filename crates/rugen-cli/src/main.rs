@@ -50,8 +50,8 @@ fn main() -> anyhow::Result<()> {
     let output_string = if let Ok(string_result) = rune::from_value::<String>(&result) {
         string_result
     } else {
-        let description = DataDescription::from(&result);
-        let value = description.generate()?;
+        let description = DataDescription::try_from(&result)?;
+        let value = rugen::generate(&description)?;
         if pretty {
             serde_json::to_string_pretty(&value)?
         } else {
