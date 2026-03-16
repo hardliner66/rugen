@@ -1,35 +1,46 @@
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::bail;
-use clap::Parser;
-use rugen::{DataDescription, module};
-use rune::{
-    Diagnostics, Source, Sources, Vm,
-    termcolor::{ColorChoice, StandardStream},
+use clap::{Parser, Subcommand};
+use rugen::{
+    DataDescription, module,
+    rune::{
+        Diagnostics, Source, Sources, Vm,
+        termcolor::{ColorChoice, StandardStream},
+    },
 };
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(short, long)]
-    pretty: bool,
-    input: PathBuf,
-    #[arg(short, long)]
-    output: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Command,
 }
 
-fn main() -> anyhow::Result<()> {
-    let Cli {
-        input,
-        output,
-        pretty,
-    } = Cli::parse();
+#[derive(Subcommand)]
+enum Command {
+    Gen {
+        #[arg(short, long)]
+        pretty: bool,
+        script: PathBuf,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    Format {
+        #[arg(short, long)]
+        in_place: bool,
+        script: PathBuf,
+    },
+}
+
+fn generate(pretty: bool, script: PathBuf, output: Option<PathBuf>) -> anyhow::Result<()> {
     let mut context = rune_modules::default_context()?;
     context.install(module()?)?;
     let mut sources = Sources::new();
-    sources.insert(Source::from_path(input)?)?;
+    sources.insert(Source::from_path(&script)?)?;
     let mut diagnostics = Diagnostics::new();
 
-    let result = rune::prepare(&mut sources)
+    let result = rugen::rune::prepare(&mut sources)
         .with_context(&context)
         .with_diagnostics(&mut diagnostics)
         .build();
@@ -46,8 +57,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut vm = Vm::new(runtime.clone(), unit);
 
-    let result = vm.call(rune::Hash::type_hash(["main"]), ())?;
-    let output_string = if let Ok(string_result) = rune::from_value::<String>(&result) {
+    let result = vm.call(rugen::rune::Hash::type_hash(["main"]), ())?;
+    let output_string = if let Ok(string_result) = rugen::rune::from_value::<String>(&result) {
         string_result
     } else {
         let description = DataDescription::try_from(&result)?;
@@ -64,4 +75,25 @@ fn main() -> anyhow::Result<()> {
         println!("{output_string}");
     }
     Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
+    let Cli { command } = Cli::parse();
+    match command {
+        Command::Gen {
+            pretty,
+            script,
+            output,
+        } => generate(pretty, script, output),
+
+        Command::Format { script, in_place } => {
+            let formatted = rugen::format_rune_script(&script).expect("Could not format script!");
+            if in_place {
+                std::fs::write(script, formatted)?;
+            } else {
+                println!("{formatted}")
+            }
+            Ok(())
+        }
+    }
 }

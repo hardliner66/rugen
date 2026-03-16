@@ -7,7 +7,7 @@ pub fn main() {
         variable: r::list(2..8, 55.0..128.0),
         range_from: 100..,
         range_to: ..100,
-        choice: r::choose([
+        choice: r::choose([ //
             #{ A: 100..=200 },
             #{ B: -100..100 },
             #{ C: 0.5..2.5 },

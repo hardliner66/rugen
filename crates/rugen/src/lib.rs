@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+pub use rune;
+
 use rand::{
     RngExt,
     seq::{IndexedRandom, WeightError},
@@ -9,6 +11,42 @@ use rune::{
     alloc::{self, Result, String as RuneString},
     runtime::{Object, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RuntimeError},
 };
+
+#[cfg(feature = "fmt")]
+use rune::{Diagnostics, Source, Sources};
+
+#[cfg(feature = "fmt")]
+pub fn format_rune_script<P: AsRef<std::path::Path>>(
+    script: P,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut sources = Sources::new();
+
+    sources.insert(match Source::from_path(&script) {
+        Ok(source) => source,
+        Err(error) => return Err(Box::new(error)),
+    })?;
+
+    let mut diagnostics = Diagnostics::new();
+
+    let options = rune::Options::default();
+
+    let build = rune::fmt::prepare(&mut sources)
+        .with_options(&options)
+        .with_diagnostics(&mut diagnostics);
+
+    let result = build.format();
+
+    if !diagnostics.is_empty() {
+        let mut writer =
+            rune::termcolor::StandardStream::stdout(rune::termcolor::ColorChoice::Always);
+        diagnostics.emit(&mut writer, &sources)?;
+    }
+
+    let formatted = result?;
+
+    let formatted = &formatted.first().unwrap().1;
+    Ok(formatted.to_string())
+}
 
 #[derive(Any, thiserror::Error, Debug)]
 pub enum RuGenError {
