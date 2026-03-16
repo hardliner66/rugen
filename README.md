@@ -126,11 +126,20 @@ To try this example locally, make sure you have rugen-cli installed, then either
 ## API
 
 ```rs
+// converts a possibly recursive value into the corresponding DataDescription
+rugen::describe(value: rune::Value) -> DataDescription;
+
 // creates a description that evaluates to the passed value
 rugen::just(value: rune::Value) -> DataDescription;
 
 // creates a description that evaluates to a random boolean
 rugen::bool() -> DataDescription;
+
+// creates a description that evaluates to an alphanumeric string of length <len>
+rugen::string(len: DataDescription) -> DataDescription;
+
+// creates a description that has a 0.0 < p < 1.0 chance to evaluate to an optional value defined by <value>
+rugen::optional(p: DataDescription, value: DataDescription) -> DataDescription;
 
 // creates a description that evaluates to a random Value between <min> and <max> (exclusive)
 rugen::range(min: rune::Value, max: rune::Value) -> DataDescription;
@@ -138,24 +147,18 @@ rugen::range(min: rune::Value, max: rune::Value) -> DataDescription;
 // creates a description that evaluates to a random Value between <min> and <max> (inclusive)
 rugen::range_inclusive(min: rune::Value, max: rune::Value) -> DataDescription;
 
-// creates a description that evaluates to an alphanumeric string of length <len>
-rugen::string(len: DataDescription) -> DataDescription;
+// creates a description that picks a random value from the passed vec
+rugen::choose(values: Vec<DataDescription>) -> DataDescription;
 
-// creates a description that evaluates to a weighted random value from the passed vec
+// creates a description that picks a random value from the passed vec,
+// while taking the weights into account
 rugen::weighted(values: Vec<(u32, DataDescription)>) -> DataDescription;
 
-// creates a description that evaluates to a vec of length <len>, filled with values defined by <item>
-rugen::array(len: DataDescription, item: DataDescription) -> DataDescription;
+// creates a description that produces a list of values by evaluating <value> for <count> times
+// this variant of values uses a fixed number as a count, which makes it produce the same number of values every time
+<count:u64>.values(value: DataDescription) -> DataDescription;
 
-// creates a description that evaluates to a an object
-rugen::object(fields: HashMap<String, DataDescription>) -> DataDescription;
-
-// creates a description that has a 0.0 < p < 1.0 chance to evaluate to an optional value defined by <item>
-rugen::optional(p: DataDescription, item: DataDescription) -> DataDescription;
-
-// creates a description that takes all items in a vec and evaluates them to values, according to their description
-rugen::tuple(items: Vec<DataDescription>) -> DataDescription;
-
-// evaluates a given description
-rugen::generate(&self) -> Result<rune::Value>;
+// creates a description that produces a list of values by first evaluating <count> and then evaluating <value> for <count> times
+// this variant of values can take a DataDescription as its count, producing as many values as count evaluates to
+rugen::values(count: DataDescription, value: DataDescription) -> DataDescription;
 ```

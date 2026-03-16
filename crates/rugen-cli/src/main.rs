@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
         string_result
     } else {
         let description = DataDescription::try_from(&result)?;
-        let value = rugen::generate(&description)?;
+        let value = description.evaluate()?;
         if pretty {
             serde_json::to_string_pretty(&value)?
         } else {

@@ -5,7 +5,7 @@ use rand::{
     seq::{IndexedRandom, WeightError},
 };
 use rune::{
-    Any, ContextError, Module, Value,
+    Any, ContextError, FromValue, Module, Value,
     alloc::{self, Result, String as RuneString},
     runtime::{Object, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RuntimeError},
 };
@@ -18,9 +18,11 @@ pub enum RuGenError {
     InvalidRangeEnd,
     #[error("Unsupported type")]
     UnsupportedType,
+    #[error("Min and max must be of the same type")]
+    MinMaxTypeMismatch,
     #[error("Invalid probability: {0}! Value must be between 0 and 1 inclusive")]
     InvalidProbability(f64),
-    #[error("Vec must have at least one item to choose from")]
+    #[error("Vec must have at least one value to choose from")]
     NoValueToChooseFrom,
     #[error("Count must be non-negative")]
     CountMustBeNonNegative,
@@ -59,18 +61,135 @@ pub enum DataDescription {
     String {
         len: Box<DataDescription>,
     },
-    OneOf(Vec<DataDescription>),
+    Choice(Vec<DataDescription>),
     Weighted(Vec<(u32, DataDescription)>),
-    Array {
-        len: Box<DataDescription>,
-        item: Box<DataDescription>,
+    FixedLengthArray {
+        count: i64,
+        value: Box<DataDescription>,
+    },
+    VariableLengthArray {
+        count: Box<DataDescription>,
+        value: Box<DataDescription>,
     },
     Object(BTreeMap<String, DataDescription>),
     Optional {
         p: f64,
-        item: Box<DataDescription>,
+        value: Box<DataDescription>,
     },
-    Tuple(Vec<DataDescription>),
+    Vec(Vec<DataDescription>),
+}
+
+impl DataDescription {
+    pub fn evaluate(&self) -> Result<Value, RuGenError> {
+        let mut rng = rand::rng();
+        match self {
+            DataDescription::Just(v) => Ok(v.clone()),
+            DataDescription::String { len } => {
+                let s: String = rng
+                    .sample_iter(rand::distr::Alphanumeric)
+                    .take(len.evaluate()?.as_usize()?)
+                    .map(char::from)
+                    .collect();
+                Ok(rune::to_value(s)?)
+            }
+            DataDescription::Choice(values) => {
+                let mut rng = rand::rng();
+                values.choose(&mut rng).map_or_else(
+                    || Err(RuGenError::NoValueToChooseFrom),
+                    DataDescription::evaluate,
+                )
+            }
+            DataDescription::VariableLengthArray {
+                count,
+                value: value_description,
+            } => Ok(rune::to_value(
+                (0..count.evaluate()?.as_usize()?)
+                    .map(|_| value_description.evaluate())
+                    .collect::<Result<Vec<Value>, RuGenError>>()?,
+            )?),
+            DataDescription::FixedLengthArray {
+                count,
+                value: value_description,
+            } => Ok(rune::to_value(
+                (0..*count)
+                    .map(|_| value_description.evaluate())
+                    .collect::<Result<Vec<Value>, RuGenError>>()?,
+            )?),
+            DataDescription::Object(obj) => {
+                let mut new_obj = Object::new();
+                for (k, v) in obj {
+                    let mut new_str = RuneString::new();
+                    new_str.try_push_str(k)?;
+                    new_obj.insert(new_str, v.evaluate()?)?;
+                }
+                Ok(rune::to_value(new_obj)?)
+            }
+            DataDescription::Optional { p, value } => {
+                let mut rng = rand::rng();
+                Ok(rune::to_value(
+                    (rng.random::<f64>() < *p)
+                        .then(|| value.evaluate())
+                        .transpose()?,
+                )?)
+            }
+            DataDescription::Vec(values) => {
+                let mut v = Vec::new();
+                for desc in values {
+                    v.push(desc.evaluate()?);
+                }
+                Ok(rune::to_value(v)?)
+            }
+            DataDescription::Bool => Ok(rune::to_value(rng.random::<bool>())?),
+            DataDescription::UInt {
+                min,
+                max,
+                inclusive,
+            } => Ok(rune::to_value(if *inclusive {
+                rng.random_range(*min..=*max)
+            } else {
+                rng.random_range(*min..*max)
+            })?),
+            DataDescription::Int {
+                min,
+                max,
+                inclusive,
+            } => Ok(rune::to_value(if *inclusive {
+                rng.random_range(*min..=*max)
+            } else {
+                rng.random_range(*min..*max)
+            })?),
+            DataDescription::Char {
+                min,
+                max,
+                inclusive,
+            } => Ok(rune::to_value(if *inclusive {
+                rng.random_range(*min..=*max)
+            } else {
+                rng.random_range(*min..*max)
+            })?),
+            DataDescription::Float {
+                min,
+                max,
+                inclusive,
+            } => Ok(rune::to_value(if *inclusive {
+                rng.random_range(*min..=*max)
+            } else {
+                rng.random_range(*min..*max)
+            })?),
+            DataDescription::Weighted(values) => {
+                let (_, v) = values.choose_weighted(&mut rng, |v| v.0)?;
+                Ok(rune::to_value(v.evaluate()?)?)
+            }
+        }
+    }
+}
+
+pub fn checked_from_value<T: FromValue>(value: &Value) -> Result<T, RuGenError> {
+    if let Ok(v) = rune::from_value::<Result<Value, RuGenError>>(value) {
+        Ok(rune::from_value(v?)?)
+    } else {
+        Ok(rune::from_value(value.to_owned())?)
+    }
 }
 
 #[rune::function]
@@ -84,6 +203,9 @@ fn bool() -> DataDescription {
 }
 
 fn range_impl(min: &Value, max: &Value, inclusive: bool) -> Result<DataDescription, RuGenError> {
+    if min.type_info() != max.type_info() {
+        return Err(RuGenError::MinMaxTypeMismatch);
+    }
     match min {
         min if min.as_integer::<u64>().is_ok() => {
             let min = min
@@ -178,36 +300,35 @@ impl TryFrom<&Value> for DataDescription {
     type Error = RuGenError;
 
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
-        if let Ok(v) = rune::from_value::<Result<Value, RuGenError>>(value) {
-            Ok(v?.try_into()?)
-        } else if let Ok(desc) = rune::from_value::<DataDescription>(value) {
+        let value = checked_from_value(value)?;
+        if let Ok(desc) = rune::from_value::<DataDescription>(&value) {
             Ok(desc)
-        } else if let Ok(obj) = rune::from_value::<Object>(value) {
+        } else if let Ok(obj) = rune::from_value::<Object>(&value) {
             Ok(DataDescription::Object(
                 obj.into_iter()
                     .map(|(k, v)| v.try_into().map(|v| (k.as_str().to_string(), v)))
                     .collect::<Result<_, _>>()?,
             ))
-        } else if let Ok(range) = rune::from_value::<Range>(value) {
+        } else if let Ok(range) = rune::from_value::<Range>(&value) {
             range_impl(&range.start, &range.end, false)
-        } else if let Ok(range) = rune::from_value::<RangeInclusive>(value) {
+        } else if let Ok(range) = rune::from_value::<RangeInclusive>(&value) {
             range_impl(&range.start, &range.end, true)
-        } else if let Ok(range) = rune::from_value::<RangeFrom>(value) {
+        } else if let Ok(range) = rune::from_value::<RangeFrom>(&value) {
             let max = value_max(&range.start).ok_or(RuGenError::UnsupportedType)?;
             range_impl(&range.start, &max, true)
-        } else if let Ok(range) = rune::from_value::<RangeTo>(value) {
+        } else if let Ok(range) = rune::from_value::<RangeTo>(&value) {
             let min = value_min(&range.end).ok_or(RuGenError::UnsupportedType)?;
             range_impl(&min, &range.end, false)
-        } else if rune::from_value::<RangeFull>(value).is_ok() {
+        } else if rune::from_value::<RangeFull>(&value).is_ok() {
             Err(RuGenError::UnsupportedType)
-        } else if let Ok(s) = rune::from_value::<Vec<Value>>(value) {
-            Ok(DataDescription::Tuple(
+        } else if let Ok(s) = rune::from_value::<Vec<Value>>(&value) {
+            Ok(DataDescription::Vec(
                 s.into_iter()
                     .map(TryInto::try_into)
                     .collect::<Result<_, _>>()?,
             ))
         } else {
-            Ok(DataDescription::Just(value.to_owned()))
+            Ok(DataDescription::Just(value))
         }
     }
 }
@@ -227,25 +348,12 @@ fn string(len: Value) -> Result<DataDescription, RuGenError> {
     })
 }
 
-#[rune::function(path = choose)]
-fn choose_one(values: Vec<Value>) -> Result<DataDescription, RuGenError> {
-    if values.is_empty() {
-        return Err(RuGenError::NoValueToChooseFrom);
-    }
-    Ok(DataDescription::OneOf(
-        values
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?,
-    ))
-}
-
-#[rune::function(instance)]
+#[rune::function]
 fn choose(values: Vec<Value>) -> Result<DataDescription, RuGenError> {
     if values.is_empty() {
         return Err(RuGenError::NoValueToChooseFrom);
     }
-    Ok(DataDescription::OneOf(
+    Ok(DataDescription::Choice(
         values
             .into_iter()
             .map(TryInto::try_into)
@@ -254,14 +362,21 @@ fn choose(values: Vec<Value>) -> Result<DataDescription, RuGenError> {
 }
 
 #[rune::function(instance)]
-fn values(count: i64, value: Value) -> Result<DataDescription, RuGenError> {
+fn values(count: i64, value_description: Value) -> Result<DataDescription, RuGenError> {
     if count < 0 {
         return Err(RuGenError::CountMustBeNonNegative);
     }
-    let count = rune::to_value(count)?;
-    Ok(DataDescription::Array {
-        len: Box::new(DataDescription::Just(count)),
-        item: Box::new(value.try_into()?),
+    Ok(DataDescription::FixedLengthArray {
+        count,
+        value: Box::new(value_description.try_into()?),
+    })
+}
+
+#[rune::function(path = values)]
+fn variable_values(count: Value, value: Value) -> Result<DataDescription, RuGenError> {
+    Ok(DataDescription::VariableLengthArray {
+        count: Box::new(count.try_into()?),
+        value: Box::new(value.try_into()?),
     })
 }
 
@@ -279,193 +394,35 @@ fn weighted(values: Vec<(u32, Value)>) -> Result<DataDescription, RuGenError> {
 }
 
 #[rune::function]
-fn array(len: Value, item: Value) -> Result<DataDescription, RuGenError> {
-    if let Ok(v) = len.as_integer::<i64>()
-        && v < 0
-    {
-        return Err(RuGenError::CountMustBeNonNegative);
-    }
-    Ok(DataDescription::Array {
-        len: Box::new(len.try_into()?),
-        item: Box::new(item.try_into()?),
-    })
-}
-
-fn object_impl(obj: &Object) -> Result<DataDescription, RuGenError> {
-    Ok(DataDescription::Object(
-        obj.into_iter()
-            .map(|(k, v)| v.try_into().map(|v| (k.as_str().to_string(), v)))
-            .collect::<Result<_, _>>()?,
-    ))
-}
-
-#[rune::function]
-fn object(obj: &Object) -> Result<DataDescription, RuGenError> {
-    object_impl(obj)
-}
-
-#[rune::function]
-fn optional(p: Value, item: Value) -> Result<DataDescription, RuGenError> {
-    let p = rune::from_value(p)?;
+fn optional(p: Value, value: Value) -> Result<DataDescription, RuGenError> {
+    let p = checked_from_value(&p)?;
     if !(0.0..=1.0).contains(&p) {
         return Err(RuGenError::InvalidProbability(p));
     }
     Ok(DataDescription::Optional {
         p,
-        item: Box::new(item.try_into()?),
+        value: Box::new(value.try_into()?),
     })
 }
 
 #[rune::function]
-fn tuple(items: Vec<Value>) -> Result<DataDescription, RuGenError> {
-    Ok(DataDescription::Tuple(
-        items
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?,
-    ))
-}
-
-pub fn generate(this: &DataDescription) -> Result<Value, RuGenError> {
-    let mut rng = rand::rng();
-    match this {
-        DataDescription::Just(v) => Ok(v.clone()),
-        DataDescription::String { len } => {
-            let s: String = rng
-                .sample_iter(rand::distr::Alphanumeric)
-                .take(generate(len)?.as_usize()?)
-                .map(char::from)
-                .collect();
-            Ok(rune::to_value(s)?)
-        }
-        DataDescription::OneOf(values) => {
-            let mut rng = rand::rng();
-            values
-                .choose(&mut rng)
-                .map_or_else(|| Err(RuGenError::NoValueToChooseFrom), generate)
-        }
-        DataDescription::Array { len, item } => Ok(rune::to_value(
-            (0..generate(len)?.as_usize()?)
-                .map(|_| generate(item))
-                .collect::<Result<Vec<Value>, RuGenError>>()?,
-        )?),
-        DataDescription::Object(obj) => {
-            let mut new_obj = Object::new();
-            for (k, v) in obj {
-                let mut new_str = RuneString::new();
-                new_str.try_push_str(k)?;
-                new_obj.insert(new_str, generate(v)?)?;
-            }
-            Ok(rune::to_value(new_obj)?)
-        }
-        DataDescription::Optional { p, item } => {
-            let mut rng = rand::rng();
-            Ok(rune::to_value(
-                (rng.random::<f64>() < *p)
-                    .then(|| generate(item))
-                    .transpose()?,
-            )?)
-        }
-        DataDescription::Tuple(values) => {
-            let mut v = Vec::new();
-            for desc in values {
-                v.push(generate(desc)?);
-            }
-            Ok(rune::to_value(v)?)
-        }
-        DataDescription::Bool => Ok(rune::to_value(rng.random::<bool>())?),
-        DataDescription::UInt {
-            min,
-            max,
-            inclusive,
-        } => Ok(rune::to_value(if *inclusive {
-            rng.random_range(*min..=*max)
-        } else {
-            rng.random_range(*min..*max)
-        })?),
-        DataDescription::Int {
-            min,
-            max,
-            inclusive,
-        } => Ok(rune::to_value(if *inclusive {
-            rng.random_range(*min..=*max)
-        } else {
-            rng.random_range(*min..*max)
-        })?),
-        DataDescription::Char {
-            min,
-            max,
-            inclusive,
-        } => Ok(rune::to_value(if *inclusive {
-            rng.random_range(*min..=*max)
-        } else {
-            rng.random_range(*min..*max)
-        })?),
-        DataDescription::Float {
-            min,
-            max,
-            inclusive,
-        } => Ok(rune::to_value(if *inclusive {
-            rng.random_range(*min..=*max)
-        } else {
-            rng.random_range(*min..*max)
-        })?),
-        DataDescription::Weighted(items) => {
-            let (_, v) = items.choose_weighted(&mut rng, |v| v.0)?;
-            Ok(rune::to_value(generate(v))?)
-        }
-    }
-}
-
-#[rune::function]
-fn describe(this: Value) -> Result<Value, RuGenError> {
-    let desc: DataDescription = this.try_into()?;
-    Ok(rune::to_value(desc)?)
-}
-
-#[rune::function(instance, path = to_description)]
-fn describe_object(this: &Object) -> Result<Value, RuGenError> {
-    let desc = object_impl(this)?;
-    Ok(rune::to_value(desc)?)
-}
-
-#[rune::function(instance, path = to_description)]
-fn describe_vec(this: Vec<Value>) -> Result<Value, RuGenError> {
-    let desc = DataDescription::Array {
-        len: Box::new(DataDescription::Just(rune::to_value(this.len())?)),
-        item: Box::new(DataDescription::Tuple(
-            this.into_iter()
-                .map(DataDescription::try_from)
-                .collect::<Result<_, _>>()?,
-        )),
-    };
-    Ok(rune::to_value(desc)?)
-}
-
-#[rune::function(instance, path = generate)]
-fn generate_data(this: &DataDescription) -> Result<Value, RuGenError> {
-    generate(this)
+fn describe(this: Value) -> Result<DataDescription, RuGenError> {
+    this.try_into()
 }
 
 pub fn module() -> Result<Module, ContextError> {
     let mut m = Module::with_item(["rugen"])?;
     m.ty::<DataDescription>()?;
-    m.function_meta(range)?;
-    m.function_meta(range_inclusive)?;
+    m.function_meta(describe)?;
     m.function_meta(just)?;
     m.function_meta(bool)?;
     m.function_meta(string)?;
-    m.function_meta(choose_one)?;
+    m.function_meta(optional)?;
+    m.function_meta(range)?;
+    m.function_meta(range_inclusive)?;
     m.function_meta(choose)?;
     m.function_meta(weighted)?;
-    m.function_meta(array)?;
-    m.function_meta(object)?;
-    m.function_meta(optional)?;
-    m.function_meta(tuple)?;
     m.function_meta(values)?;
-    m.function_meta(describe_object)?;
-    m.function_meta(describe_vec)?;
-    m.function_meta(describe)?;
-    m.function_meta(generate_data)?;
+    m.function_meta(variable_values)?;
     Ok(m)
 }

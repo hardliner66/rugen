@@ -3,7 +3,8 @@ use rugen as r;
 pub fn main() {
     #{
         asdf: 1..10,
-        values: 5.values(55.0..128.0),
+        fixed: 5.values(55.0..128.0),
+        variable: r::list(2..8, 55.0..128.0),
         range_from: 100..,
         range_to: ..100,
         choice: r::choose([
