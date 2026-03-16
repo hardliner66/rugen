@@ -18,7 +18,7 @@ use rune::{Diagnostics, Source, Sources};
 #[cfg(feature = "fmt")]
 pub fn format_rune_script<P: AsRef<std::path::Path>>(
     script: P,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut sources = Sources::new();
 
     sources.insert(match Source::from_path(&script) {
@@ -45,7 +45,8 @@ pub fn format_rune_script<P: AsRef<std::path::Path>>(
     let formatted = result?;
 
     let formatted = &formatted.first().unwrap().1;
-    Ok(formatted.to_string())
+    std::fs::write(script, formatted)?;
+    Ok(())
 }
 
 #[derive(Any, thiserror::Error, Debug)]

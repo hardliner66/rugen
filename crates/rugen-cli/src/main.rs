@@ -27,8 +27,6 @@ enum Command {
     },
 
     Format {
-        #[arg(short, long)]
-        in_place: bool,
         script: PathBuf,
     },
 }
@@ -86,13 +84,8 @@ fn main() -> anyhow::Result<()> {
             output,
         } => generate(pretty, script, output),
 
-        Command::Format { script, in_place } => {
-            let formatted = rugen::format_rune_script(&script).expect("Could not format script!");
-            if in_place {
-                std::fs::write(script, formatted)?;
-            } else {
-                println!("{formatted}")
-            }
+        Command::Format { script } => {
+            rugen::format_rune_script(&script).expect("Could not format script!");
             Ok(())
         }
     }
