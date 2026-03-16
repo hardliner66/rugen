@@ -1,15 +1,15 @@
 use rugen as r;
 pub fn main() {
     r::describe(#{
-        asdf: r::uint(1, 10),
-        values: r::array(r::just(5), r::float(55.0, 128.0)),
-        choice: r::one_of(
+        asdf: r::range(1, 10),
+        values: r::array(5, r::range(55.0, 128.0)),
+        choice: r::choose(
             [
-                r::object(#{ A: r::uint(100, 200) }),
-                r::object(#{ B: r::int(-100, 100) }),
-                r::object(#{ C: r::float(0.5, 2.5) }),
-                r::object(#{ D: r::alphanumeric(r::just(10)) }),
+                r::object(#{ A: r::range(100, 200) }),
+                r::object(#{ B: r::range(-100, 100) }),
+                r::object(#{ C: r::range(0.5, 2.5) }),
+                r::object(#{ D: r::string(10) }),
             ],
         ),
-    })?
+    })
 }

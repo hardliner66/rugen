@@ -54,11 +54,6 @@ pub enum DataDescription {
     },
     String {
         len: Box<DataDescription>,
-        min: char,
-        max: char,
-    },
-    AlphaNumeric {
-        len: Box<DataDescription>,
     },
     OneOf(Vec<DataDescription>),
     Weighted(Vec<(u32, DataDescription)>),
@@ -123,26 +118,6 @@ fn range_impl(min: &Value, max: &Value) -> Result<DataDescription, RuGenError> {
 #[expect(clippy::needless_pass_by_value)]
 fn range(min: Value, max: Value) -> Result<DataDescription, RuGenError> {
     range_impl(&min, &max)
-}
-
-#[rune::function]
-fn char(min: char, max: char) -> DataDescription {
-    DataDescription::Char { min, max }
-}
-
-#[rune::function]
-fn uint(min: u64, max: u64) -> DataDescription {
-    DataDescription::UInt { min, max }
-}
-
-#[rune::function]
-fn int(min: i64, max: i64) -> DataDescription {
-    DataDescription::Int { min, max }
-}
-
-#[rune::function]
-fn float(min: f64, max: f64) -> DataDescription {
-    DataDescription::Float { min, max }
 }
 
 fn value_min(value: &Value) -> Option<Value> {
@@ -220,18 +195,9 @@ impl TryFrom<Value> for DataDescription {
 }
 
 #[rune::function]
-fn alphanumeric(len: Value) -> Result<DataDescription, RuGenError> {
-    Ok(DataDescription::AlphaNumeric {
-        len: Box::new(len.try_into()?),
-    })
-}
-
-#[rune::function]
-fn string(len: Value, min: char, max: char) -> Result<DataDescription, RuGenError> {
+fn string(len: Value) -> Result<DataDescription, RuGenError> {
     Ok(DataDescription::String {
         len: Box::new(len.try_into()?),
-        min,
-        max,
     })
 }
 
@@ -288,6 +254,11 @@ fn weighted(values: Vec<(u32, Value)>) -> Result<DataDescription, RuGenError> {
 
 #[rune::function]
 fn array(len: Value, item: Value) -> Result<DataDescription, RuGenError> {
+    if let Ok(v) = len.as_integer::<i64>()
+        && v < 0
+    {
+        return Err(RuGenError::CountMustBeNonNegative);
+    }
     Ok(DataDescription::Array {
         len: Box::new(len.try_into()?),
         item: Box::new(item.try_into()?),
@@ -333,17 +304,11 @@ pub fn generate(this: &DataDescription) -> Result<Value, RuGenError> {
     let mut rng = rand::rng();
     match this {
         DataDescription::Just(v) => Ok(v.clone()),
-        DataDescription::AlphaNumeric { len } => {
+        DataDescription::String { len } => {
             let s: String = rng
                 .sample_iter(rand::distr::Alphanumeric)
                 .take(generate(len)?.as_usize()?)
                 .map(char::from)
-                .collect();
-            Ok(rune::to_value(s)?)
-        }
-        DataDescription::String { len, min, max } => {
-            let s: String = (0..generate(len)?.as_usize()?)
-                .map(|_| rng.random_range(*min..*max))
                 .collect();
             Ok(rune::to_value(s)?)
         }
@@ -430,11 +395,6 @@ pub fn module() -> Result<Module, ContextError> {
     m.function_meta(range)?;
     m.function_meta(just)?;
     m.function_meta(bool)?;
-    m.function_meta(char)?;
-    m.function_meta(uint)?;
-    m.function_meta(int)?;
-    m.function_meta(float)?;
-    m.function_meta(alphanumeric)?;
     m.function_meta(string)?;
     m.function_meta(choose_one)?;
     m.function_meta(choose)?;
@@ -443,10 +403,10 @@ pub fn module() -> Result<Module, ContextError> {
     m.function_meta(object)?;
     m.function_meta(optional)?;
     m.function_meta(tuple)?;
-    m.function_meta(generate_data)?;
+    m.function_meta(values)?;
     m.function_meta(describe_object)?;
     m.function_meta(describe_vec)?;
     m.function_meta(describe)?;
-    m.function_meta(values)?;
+    m.function_meta(generate_data)?;
     Ok(m)
 }

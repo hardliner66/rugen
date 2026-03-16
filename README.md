@@ -58,25 +58,22 @@ and you see how the implicit api works under the hood (at least conceptually).
 use rugen as r;
 pub fn main() {
     r::describe(#{
-        asdf: r::uint(1, 10),
-        values: r::array(r::just(5), r::float(55.0, 128.0)),
-        choice: r::one_of(
+        asdf: r::range(1, 10),
+        values: r::array(5, r::range(55.0, 128.0)),
+        choice: r::choose(
             [
-                r::object(#{ A: r::uint(100, 200) }),
-                r::object(#{ B: r::int(-100, 100) }),
-                r::object(#{ C: r::float(0.5, 2.5) }),
-                r::object(#{ D: r::alphanumeric(r::just(10)) }),
+                r::object(#{ A: r::range(100, 200) }),
+                r::object(#{ B: r::range(-100, 100) }),
+                r::object(#{ C: r::range(0.5, 2.5) }),
+                r::object(#{ D: r::string(10) }),
             ],
         ),
-    })?
+    })
 }
 ```
 
 You start a description with `describe`, then you use the appropriate functions to compose your data description from its building blocks.
-`just` represents the value itself, so `just(10)` will always evaluate to `10`. You can also use `literal`, which is an alias of `just`, if you prefer.
-`uint` evaluates to a random unsigned integer, that's at least as big as the first number you pass and at most as big as the last number minus one.
-
-Each part has its own function, making it perfectly clear what kind of data you can expect.
+`just` represents the value itself, so `just(10)` will always evaluate to `10`. `range` evaluates to a random value, according to the values you pass.
 
 To try this example locally, make sure you have rugen-cli installed, then either clone the repository or download the fire from [examples/explicit.rn](./examples/explicit.rn), then you can run it with `rugen path/to/explicit.rn`.
 
@@ -98,7 +95,7 @@ Especially if you always use a lower and an upper limit in a range (`lower_limit
 data as JSON, so there is no need to have the limits from the ranges *AND* the limits from the data type at the same time.
 
 ```rs
-use rugen::*;
+use rugen as r;
 
 pub fn main() {
     #{
@@ -106,12 +103,12 @@ pub fn main() {
         values: 5.values(55.0..128.0),
         range_from: 100..,
         range_to: ..100,
-        choice: [
+        choice: r::choose([
             #{ A: 100..=200 },
             #{ B: -100..100 },
             #{ C: 0.5..2.5 },
-            #{ D: alphanumeric(10) },
-        ].pick(),
+            #{ D: r::string(10) },
+        ]),
     }
 }
 ```
@@ -135,23 +132,11 @@ rugen::just(value: rune::Value) -> DataDescription;
 // creates a description that evaluates to a random boolean
 rugen::bool() -> DataDescription;
 
-// creates a description that evaluates to a random u64 between <min> and <max> (exclusive)
-rugen::uint(min: u64, max:  u64) -> DataDescription;
+// creates a description that evaluates to a random Value between <min> and <max> (exclusive)
+rugen::range(min: rune::Value, max: rune::Value) -> DataDescription;
 
-// creates a description that evaluates to a random i64 between <min> and <max> (exclusive)
-rugen::int(min: i64, max:  i64) -> DataDescription;
-
-// creates a description that evaluates to a random f64 between <min> and <max> (exclusive)
-rugen::float(min: f32, max: f32) -> DataDescription;
-
-// creates a description that evaluates to a string of random alpha numeric characters that is <len> long
-rugen::alphanumeric(len: DataDescription) -> DataDescription;
-
-// creates a description that evaluates to a string of random characters between <min> and <max> (exclusive)
-rugen::string(min: usize, max: usize) -> DataDescription;
-
-// creates a description that evaluates to a random value from the passed vec
-rugen::one_of(values: Vec<DataDescription>) -> DataDescription;
+// creates a description that evaluates to an alphanumeric string of length <len>
+rugen::string(len: DataDescription) -> DataDescription;
 
 // creates a description that evaluates to a weighted random value from the passed vec
 rugen::weighted(values: Vec<(u32, DataDescription)>) -> DataDescription;
