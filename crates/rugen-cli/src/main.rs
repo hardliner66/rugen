@@ -1,6 +1,5 @@
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::bail;
 use clap::{Parser, Subcommand};
 use rugen::{
     DataDescription, module,
@@ -45,8 +44,6 @@ fn generate(pretty: bool, script: PathBuf, output: Option<PathBuf>) -> anyhow::R
     if !diagnostics.is_empty() {
         let mut writer = StandardStream::stderr(ColorChoice::Always);
         diagnostics.emit(&mut writer, &sources)?;
-
-        bail!("Script compilation failed");
     }
 
     let unit = Arc::new(result?);
