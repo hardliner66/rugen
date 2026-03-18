@@ -73,7 +73,7 @@ pub fn main() {
 ```
 
 You start a description with `describe`, then you use the appropriate functions to compose your data description from its building blocks.
-`just` represents the value itself, so `just(10)` will always evaluate to `10`. `range` evaluates to a random value, according to the values you pass.
+Using a value directly represents the value itself, so `10` will always evaluate to `10`. `range` evaluates to a random value, according to the values you pass.
 
 To try this example locally, make sure you have rugen-cli installed, then either clone the repository or download the fire from [examples/explicit.rn](./examples/explicit.rn), then you can run it with `rugen path/to/explicit.rn`.
 
@@ -128,9 +128,6 @@ To try this example locally, make sure you have rugen-cli installed, then either
 ```rs
 // converts a possibly recursive value into the corresponding DataDescription
 rugen::describe(value: rune::Value) -> DataDescription;
-
-// creates a description that evaluates to the passed value
-rugen::just(value: rune::Value) -> DataDescription;
 
 // creates a description that evaluates to a random boolean
 rugen::bool() -> DataDescription;

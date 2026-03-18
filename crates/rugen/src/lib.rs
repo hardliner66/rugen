@@ -232,11 +232,6 @@ pub fn checked_from_value<T: FromValue>(value: &Value) -> Result<T, RuGenError> 
 }
 
 #[rune::function]
-fn just(value: Value) -> DataDescription {
-    DataDescription::Just(value)
-}
-
-#[rune::function]
 fn bool() -> DataDescription {
     DataDescription::Bool
 }
@@ -453,7 +448,6 @@ pub fn module() -> Result<Module, ContextError> {
     let mut m = Module::with_item(["rugen"])?;
     m.ty::<DataDescription>()?;
     m.function_meta(describe)?;
-    m.function_meta(just)?;
     m.function_meta(bool)?;
     m.function_meta(string)?;
     m.function_meta(optional)?;
