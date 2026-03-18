@@ -14,7 +14,7 @@ name = "rugen"
 path = "src/main.rs"
 
 [dependencies]
-rugen = { version = "0.14.0", path = "../rugen", features = ["fmt"] }
+rugen = { version = "0.15.0", path = "../rugen", features = ["fmt"] }
 anyhow = "1.0.102"
 clap = { version = "4.0.32", features = ["derive"] }
 rune-modules = { version = "0.14.1", features = ["full"] }
