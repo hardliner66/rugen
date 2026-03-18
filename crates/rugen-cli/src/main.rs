@@ -2,11 +2,12 @@ use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use rugen::{
-    DataDescription, module,
+    evaluate, module,
     rune::{
         Diagnostics, Source, Sources, Vm,
         termcolor::{ColorChoice, StandardStream},
     },
+    try_build_description,
 };
 
 #[derive(Parser)]
@@ -29,11 +30,11 @@ enum Command {
     Format { script: PathBuf },
 }
 
-fn generate(pretty: bool, script: PathBuf, output: Option<PathBuf>) -> anyhow::Result<()> {
+fn generate(pretty: bool, script: &PathBuf, output: Option<PathBuf>) -> anyhow::Result<()> {
     let mut context = rune_modules::default_context()?;
     context.install(module()?)?;
     let mut sources = Sources::new();
-    sources.insert(Source::from_path(&script)?)?;
+    sources.insert(Source::from_path(script)?)?;
     let mut diagnostics = Diagnostics::new();
 
     let result = rugen::rune::prepare(&mut sources)
@@ -55,8 +56,8 @@ fn generate(pretty: bool, script: PathBuf, output: Option<PathBuf>) -> anyhow::R
     let output_string = if let Ok(string_result) = rugen::rune::from_value::<String>(&result) {
         string_result
     } else {
-        let description = DataDescription::try_from(&result)?;
-        let value = description.evaluate()?;
+        let description = try_build_description(&result)?;
+        let value = evaluate(&description)?;
         if pretty {
             serde_json::to_string_pretty(&value)?
         } else {
@@ -78,7 +79,7 @@ fn main() -> anyhow::Result<()> {
             pretty,
             script,
             output,
-        } => generate(pretty, script, output),
+        } => generate(pretty, &script, output),
 
         Command::Format { script } => {
             rugen::format_rune_script(&script).expect("Could not format script!");
