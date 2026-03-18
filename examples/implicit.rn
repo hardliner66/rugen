@@ -2,6 +2,9 @@ use rugen as r;
 
 pub fn main() {
     #{
+        z: #{
+            b: r::values(1..2, #{c: #{d: 1..'z'}}),
+        },
         asdf: 1..10,
         values: #{ //
             fixed: 5.values(55.0..128.0),
