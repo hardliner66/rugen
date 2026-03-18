@@ -304,7 +304,17 @@ pub fn evaluate(description: &DataDescription) -> Result<Value, EvaluationError>
     evaluate_inner(description, path)
 }
 
-fn checked_from_value<T: FromValue>(
+pub fn checked_from_value<T: FromValue>(value: &Value) -> Result<T, DescriptionError> {
+    checked_from_value_inner(
+        value,
+        &PathHelper {
+            root: true,
+            inner: &mut Vec::new(),
+        },
+    )
+}
+
+fn checked_from_value_inner<T: FromValue>(
     value: &Value,
     path: &PathHelper,
 ) -> Result<T, DescriptionError> {
@@ -509,7 +519,7 @@ fn try_build_from_marker_inner(
             )?),
         }),
         Marker::Optional { p, value } => {
-            let p = checked_from_value(p, path)?;
+            let p = checked_from_value_inner(p, path)?;
             if !(0.0..=1.0).contains(&p) {
                 return Err(DescriptionError::InvalidProbability(
                     path_to_location_string(path),
@@ -531,7 +541,7 @@ fn try_build_description_inner(
     value: &Value,
     mut path: PathHelper,
 ) -> Result<DataDescription, DescriptionError> {
-    let value = checked_from_value(value, &path)?;
+    let value = checked_from_value_inner(value, &path)?;
     if let Ok(desc) = rune::from_value::<DataDescription>(&value) {
         Ok(desc)
     } else if let Ok(desc) = rune::from_value::<Result<Marker, DescriptionError>>(&value) {
@@ -589,51 +599,6 @@ pub fn try_build_description(value: &Value) -> Result<DataDescription, Descripti
         },
     )
 }
-
-// impl TryFrom<&Value> for DataDescription {
-//     type Error = RuGenError;
-
-//     fn try_from(value: &Value) -> Result<Self, Self::Error> {
-//         let value = checked_from_value(value)?;
-//         if let Ok(desc) = rune::from_value::<DataDescription>(&value) {
-//             Ok(desc)
-//         } else if let Ok(obj) = rune::from_value::<Object>(&value) {
-//             Ok(DataDescription::Object(
-//                 obj.into_iter()
-//                     .map(|(k, v)| v.try_into().map(|v| (k.as_str().to_string(), v)))
-//                     .collect::<Result<_, _>>()?,
-//             ))
-//         } else if let Ok(range) = rune::from_value::<Range>(&value) {
-//             range_impl(&range.start, &range.end, false)
-//         } else if let Ok(range) = rune::from_value::<RangeInclusive>(&value) {
-//             range_impl(&range.start, &range.end, true)
-//         } else if let Ok(range) = rune::from_value::<RangeFrom>(&value) {
-//             let max = value_max(&range.start).ok_or(RuGenError::UnsupportedType)?;
-//             range_impl(&range.start, &max, true)
-//         } else if let Ok(range) = rune::from_value::<RangeTo>(&value) {
-//             let min = value_min(&range.end).ok_or(RuGenError::UnsupportedType)?;
-//             range_impl(&min, &range.end, false)
-//         } else if rune::from_value::<RangeFull>(&value).is_ok() {
-//             Err(RuGenError::UnsupportedType)
-//         } else if let Ok(s) = rune::from_value::<Vec<Value>>(&value) {
-//             Ok(DataDescription::Vec(
-//                 s.into_iter()
-//                     .map(TryInto::try_into)
-//                     .collect::<Result<_, _>>()?,
-//             ))
-//         } else {
-//             Ok(DataDescription::Just(value))
-//         }
-//     }
-// }
-
-// impl TryFrom<Value> for DataDescription {
-//     type Error = RuGenError;
-
-//     fn try_from(value: Value) -> Result<Self, Self::Error> {
-//         DataDescription::try_from(&value)
-//     }
-// }
 
 #[rune::function]
 fn bool() -> Marker {
