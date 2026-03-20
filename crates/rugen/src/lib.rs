@@ -7,9 +7,11 @@ use rand::{
     seq::{IndexedRandom, WeightError},
 };
 use rune::{
-    Any, ContextError, FromValue, Module, Value,
+    Any, ContextError, FromValue, Module, ToConstValue, Value,
     alloc::{self, Result, String as RuneString},
-    runtime::{Object, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RuntimeError},
+    runtime::{
+        Object, Protocol, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RuntimeError,
+    },
 };
 
 #[cfg(feature = "fmt")]
@@ -641,9 +643,56 @@ fn describe(this: Value) -> Result<DataDescription, DescriptionError> {
     try_build_description(&this)
 }
 
+fn bit_or(left: Object, right: Value) -> Marker {
+    let left = rune::to_value(left).unwrap();
+    if let Ok(mut right_vec) = rune::from_value::<Marker>(&right) {
+        match &mut right_vec {
+            Marker::Choice(values) => {
+                values.push(left);
+                Marker::Choice(values.clone())
+            }
+            _ => Marker::Choice(vec![left, right]),
+        }
+    } else {
+        Marker::Choice(vec![left, right])
+    }
+}
+
+fn bit_or_marker(left: Marker, right: Value) -> Marker {
+    match left {
+        Marker::Choice(mut values) => {
+            values.push(right);
+            Marker::Choice(values)
+        }
+        _ => Marker::Choice(vec![rune::to_value(left).unwrap(), right]),
+    }
+}
+
+fn mul_range(value: Range, count: Value) -> Marker {
+    let value = rune::to_value(value).expect("Range should always be convertible to Value");
+    if let Ok(i) = rune::from_value::<i64>(&value) {
+        Marker::FixedLengthArray {
+            count: i,
+            value: rune::to_value(i).expect("i64 should always be convertible to Value"),
+        }
+    } else {
+        Marker::VariableLengthArray { count, value }
+    }
+}
+
+fn mul_alpha(_: Alpha, len: Value) -> Marker {
+    Marker::String { len }
+}
+
+#[derive(Any, ToConstValue)]
+struct Alpha {}
+
 pub fn module() -> Result<Module, ContextError> {
     let mut m = Module::with_item(["rugen"])?;
+    m.ty::<Marker>()?;
     m.ty::<DataDescription>()?;
+    m.ty::<Alpha>()?;
+    m.constant("ALPHA", Alpha {}).build()?;
     m.function_meta(describe)?;
     m.function_meta(bool)?;
     m.function_meta(string)?;
@@ -654,6 +703,11 @@ pub fn module() -> Result<Module, ContextError> {
     m.function_meta(weighted)?;
     m.function_meta(values)?;
     m.function_meta(variable_values)?;
+
+    m.associated_function(&Protocol::MUL, mul_range)?;
+    m.associated_function(&Protocol::MUL, mul_alpha)?;
+    m.associated_function(&Protocol::BIT_OR, bit_or)?;
+    m.associated_function(&Protocol::BIT_OR, bit_or_marker)?;
     Ok(m)
 }
 
