@@ -1,7 +1,7 @@
 use rugen::ALPHA;
 
 pub fn main() {
-    let description = rugen::describe! {
+     rugen::describe! {
         asdf: 1..10,
         values: #{ //
             fixed: (55.0..128.0) * 5,
@@ -15,6 +15,5 @@ pub fn main() {
               | #{ D: ALPHA * 10 },
         string: ALPHA * 10,
         string_var: ALPHA * (5..15),
-    };
-    description.generate()?
+    }.generate()?
 }

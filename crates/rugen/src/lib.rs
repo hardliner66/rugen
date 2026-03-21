@@ -9,6 +9,7 @@ use rand::{
 use rune::{
     Any, ContextError, FromValue, Module, ToConstValue, Value,
     alloc::{self, Result, String as RuneString},
+    ast::Spanned,
     macros::Quote,
     runtime::{
         Object, Protocol, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RuntimeError,
@@ -24,39 +25,40 @@ use rune::compile;
 use rune::macros::{MacroContext, TokenStream, quote};
 use rune::parse::Parser;
 
-fn parse_expr<'a>(expr: ast::Expr) -> Quote<'a> {
+fn parse_expr<'a>(
+    cx: &mut MacroContext<'_, '_, '_>,
+    expr: ast::Expr,
+) -> compile::Result<Quote<'a>> {
+    let span = expr.span();
+    let start = cx.lit(span.start.into_usize())?;
     match expr {
         ast::Expr::Binary(ast::ExprBinary {
             lhs,
             op: ast::BinOp::Mul(_),
             rhs,
             ..
-        }) => {
-            quote!(rugen::make_description(#lhs * #rhs, line!())?)
-        }
+        }) => Ok(quote!(rugen::make_description(#lhs * #rhs, #start)?)),
         ast::Expr::Object(o) => {
             let mut result = quote!();
             for a in o.assignments {
                 let name = a.0.key;
                 if let Some((_, expr)) = a.0.assign {
-                    let rhs = parse_expr(expr);
+                    let rhs = parse_expr(cx, expr)?;
                     result = quote!(#result #name: #rhs,);
                 }
             }
-            quote!(#{#result})
+            Ok(quote!(#{#result}))
         }
         ast::Expr::Vec(v) => {
             let mut result = quote!();
             for a in v.items {
-                let v = parse_expr(a.0);
+                let v = parse_expr(cx, a.0)?;
                 result = quote!(#result #v,);
             }
-            quote!([#result])
+            Ok(quote!([#result]))
         }
-        ast::Expr::Range(r) => {
-            quote!(rugen::make_description(#r, line!())?)
-        }
-        value => quote!(#value),
+        ast::Expr::Range(r) => Ok(quote!(rugen::make_description(#r, #start)?)),
+        value => Ok(quote!(#value)),
     }
 }
 
@@ -80,7 +82,7 @@ fn describe(
 
         parser.parse::<T![:]>()?;
 
-        let value = parse_expr(parser.parse::<ast::Expr>()?);
+        let value = parse_expr(cx, parser.parse::<ast::Expr>()?)?;
 
         fields.push((key, value));
 
@@ -99,7 +101,9 @@ fn describe(
         object_tokens = quote!(#object_tokens #key: #value);
     }
 
-    Ok(quote!(rugen::make_description(#{#object_tokens}, line!())?).into_token_stream(cx)?)
+    let span = cx.input_span();
+    let start = cx.lit(span.start.into_usize())?;
+    Ok(quote!(rugen::make_description(#{#object_tokens}, #start)?).into_token_stream(cx)?)
 }
 
 #[cfg(feature = "fmt")]
@@ -137,21 +141,21 @@ pub fn format_rune_script(script: &Path) -> Result<(), Box<dyn std::error::Error
 #[derive(Any, thiserror::Error, Debug)]
 pub enum DescriptionError {
     #[error("Invalid range start{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
-    InvalidRangeStart(Option<i64>),
+    InvalidRangeStart(Option<usize>),
     #[error("Invalid range end{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
-    InvalidRangeEnd(Option<i64>),
+    InvalidRangeEnd(Option<usize>),
     #[error("Unsupported type{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
-    UnsupportedType(Option<i64>),
+    UnsupportedType(Option<usize>),
     #[error("Vec must have at least one value to choose from{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
-    NoValueToChooseFrom(Option<i64>),
+    NoValueToChooseFrom(Option<usize>),
     #[error("Min and max of range must be of the same type{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
-    MinMaxTypeMismatch(Option<i64>),
+    MinMaxTypeMismatch(Option<usize>),
     #[error("Invalid probability: {}{}", .0, .1.map_or("".to_string(), |v| format!(" at line {v}")))]
-    InvalidProbability(f64, Option<i64>),
+    InvalidProbability(f64, Option<usize>),
     #[error("Count must be non-negative{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
-    CountMustBeNonNegative(Option<i64>),
+    CountMustBeNonNegative(Option<usize>),
     #[error("Could not convert value to expected type: {}{}", .0, .1.map_or("".to_string(), |v| format!(" at line {v}")))]
-    ConversionError(String, Option<i64>),
+    ConversionError(String, Option<usize>),
 }
 
 #[derive(Any, thiserror::Error, Debug)]
@@ -387,7 +391,7 @@ pub fn checked_from_value<T: FromValue>(value: &Value) -> Result<T, DescriptionE
 
 fn checked_from_value_inner<T: FromValue>(
     value: &Value,
-    line: Option<i64>,
+    line: Option<usize>,
 ) -> Result<T, DescriptionError> {
     let res = if let Ok(v) = rune::from_value::<Result<Value, DescriptionError>>(value) {
         rune::from_value(v?)
@@ -404,7 +408,7 @@ fn range_impl(
     min: &Value,
     max: &Value,
     inclusive: bool,
-    line: Option<i64>,
+    line: Option<usize>,
 ) -> Result<DataDescription, DescriptionError> {
     if min.type_info() != max.type_info() {
         return Err(DescriptionError::MinMaxTypeMismatch(line));
@@ -515,7 +519,7 @@ fn value_max(value: &Value) -> Option<Value> {
 
 fn try_build_from_marker_inner(
     desc: &Marker,
-    line: Option<i64>,
+    line: Option<usize>,
 ) -> Result<DataDescription, DescriptionError> {
     match desc {
         Marker::Bool => Ok(DataDescription::Bool),
@@ -568,7 +572,7 @@ fn try_build_from_marker_inner(
 
 fn try_build_description_inner(
     value: &Value,
-    line: Option<i64>,
+    line: Option<usize>,
 ) -> Result<DataDescription, DescriptionError> {
     let value = checked_from_value_inner(value, line)?;
     if let Ok(desc) = rune::from_value::<DataDescription>(&value) {
@@ -611,9 +615,50 @@ fn try_build_description_inner(
     }
 }
 
+pub fn fix_line_number(err: DescriptionError, source: &Source) -> DescriptionError {
+    match err {
+        DescriptionError::InvalidRangeStart(Some(pos)) => {
+            DescriptionError::InvalidRangeStart(Some(source.pos_to_utf8_linecol(pos).0 + 1))
+        }
+        DescriptionError::InvalidRangeEnd(Some(pos)) => {
+            DescriptionError::InvalidRangeEnd(Some(source.pos_to_utf8_linecol(pos).0 + 1))
+        }
+        DescriptionError::UnsupportedType(Some(pos)) => {
+            DescriptionError::UnsupportedType(Some(source.pos_to_utf8_linecol(pos).0 + 1))
+        }
+        DescriptionError::NoValueToChooseFrom(Some(pos)) => {
+            DescriptionError::NoValueToChooseFrom(Some(source.pos_to_utf8_linecol(pos).0 + 1))
+        }
+        DescriptionError::MinMaxTypeMismatch(Some(pos)) => {
+            DescriptionError::MinMaxTypeMismatch(Some(source.pos_to_utf8_linecol(pos).0 + 1))
+        }
+        DescriptionError::InvalidProbability(p, Some(pos)) => {
+            DescriptionError::InvalidProbability(p, Some(source.pos_to_utf8_linecol(pos).0 + 1))
+        }
+        DescriptionError::CountMustBeNonNegative(Some(pos)) => {
+            DescriptionError::CountMustBeNonNegative(Some(source.pos_to_utf8_linecol(pos).0 + 1))
+        }
+        DescriptionError::ConversionError(s, Some(pos)) => {
+            DescriptionError::ConversionError(s, Some(source.pos_to_utf8_linecol(pos).0 + 1))
+        }
+        DescriptionError::InvalidRangeStart(None) => DescriptionError::InvalidRangeStart(None),
+        DescriptionError::InvalidRangeEnd(None) => DescriptionError::InvalidRangeEnd(None),
+        DescriptionError::UnsupportedType(None) => DescriptionError::UnsupportedType(None),
+        DescriptionError::NoValueToChooseFrom(None) => DescriptionError::NoValueToChooseFrom(None),
+        DescriptionError::MinMaxTypeMismatch(None) => DescriptionError::MinMaxTypeMismatch(None),
+        DescriptionError::InvalidProbability(p, None) => {
+            DescriptionError::InvalidProbability(p, None)
+        }
+        DescriptionError::CountMustBeNonNegative(None) => {
+            DescriptionError::CountMustBeNonNegative(None)
+        }
+        DescriptionError::ConversionError(s, None) => DescriptionError::ConversionError(s, None),
+    }
+}
+
 pub fn try_build_description(
     value: &Value,
-    line: Option<i64>,
+    line: Option<usize>,
 ) -> Result<DataDescription, DescriptionError> {
     try_build_description_inner(value, line)
 }
@@ -654,8 +699,8 @@ fn optional(p: Value, value: Value) -> Marker {
 }
 
 #[rune::function]
-fn make_description(this: Value, line: i64) -> Result<DataDescription, DescriptionError> {
-    try_build_description(&this, Some(line))
+fn make_description(this: Value, pos: usize) -> Result<DataDescription, DescriptionError> {
+    try_build_description(&this, Some(pos))
 }
 
 #[rune::function]

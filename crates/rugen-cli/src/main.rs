@@ -2,9 +2,9 @@ use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use rugen::{
-    DescriptionError, module,
+    DescriptionError, fix_line_number, module,
     rune::{
-        Diagnostics, Source, Sources, Value, Vm,
+        Diagnostics, Source, SourceId, Sources, Value, Vm,
         termcolor::{ColorChoice, StandardStream},
     },
 };
@@ -58,7 +58,7 @@ fn generate(pretty: bool, script: &PathBuf, output: Option<PathBuf>) -> anyhow::
         let value = if let Ok(value) =
             rugen::rune::from_value::<Result<Value, DescriptionError>>(&result)
         {
-            value?
+            value.map_err(|e| fix_line_number(e, &sources.get(SourceId::new(0)).unwrap()))?
         } else {
             result
         };
