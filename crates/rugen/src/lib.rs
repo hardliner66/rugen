@@ -9,6 +9,7 @@ use rand::{
 use rune::{
     Any, ContextError, FromValue, Module, ToConstValue, Value,
     alloc::{self, Result, String as RuneString},
+    macros::Quote,
     runtime::{
         Object, Protocol, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RuntimeError,
     },
@@ -16,6 +17,90 @@ use rune::{
 
 #[cfg(feature = "fmt")]
 use rune::{Diagnostics, Source, Sources};
+
+use rune::T;
+use rune::ast;
+use rune::compile;
+use rune::macros::{MacroContext, TokenStream, quote};
+use rune::parse::Parser;
+
+fn parse_expr<'a>(expr: ast::Expr) -> Quote<'a> {
+    match expr {
+        ast::Expr::Binary(ast::ExprBinary {
+            lhs,
+            op: ast::BinOp::Mul(_),
+            rhs,
+            ..
+        }) => {
+            quote!(rugen::make_description(#lhs * #rhs, line!())?)
+        }
+        ast::Expr::Object(o) => {
+            let mut result = quote!();
+            for a in o.assignments {
+                let name = a.0.key;
+                if let Some((_, expr)) = a.0.assign {
+                    let rhs = parse_expr(expr);
+                    result = quote!(#result #name: #rhs,);
+                }
+            }
+            quote!(#{#result})
+        }
+        ast::Expr::Vec(v) => {
+            let mut result = quote!();
+            for a in v.items {
+                let v = parse_expr(a.0);
+                result = quote!(#result #v,);
+            }
+            quote!([#result])
+        }
+        ast::Expr::Range(r) => {
+            quote!(rugen::make_description(#r, line!())?)
+        }
+        value => quote!(#value),
+    }
+}
+
+#[rune::macro_]
+fn describe(
+    cx: &mut MacroContext<'_, '_, '_>,
+    stream: &TokenStream,
+) -> compile::Result<TokenStream> {
+    let mut parser = Parser::from_token_stream(stream, cx.input_span());
+
+    let mut fields = Vec::new();
+
+    while !parser.is_eof()? {
+        let key = if parser.peek::<ast::Ident>()? {
+            let ident = parser.parse::<ast::Ident>()?;
+            quote!(#ident)
+        } else {
+            let lit = parser.parse::<ast::LitStr>()?;
+            quote!(#lit)
+        };
+
+        parser.parse::<T![:]>()?;
+
+        let value = parse_expr(parser.parse::<ast::Expr>()?);
+
+        fields.push((key, value));
+
+        if parser.parse::<Option<T![,]>>()?.is_none() {
+            break;
+        }
+    }
+
+    parser.eof()?;
+
+    let mut object_tokens = quote!();
+    for (i, (key, value)) in fields.iter().enumerate() {
+        if i > 0 {
+            object_tokens = quote!(#object_tokens,); // Add a comma between fields
+        }
+        object_tokens = quote!(#object_tokens #key: #value);
+    }
+
+    Ok(quote!(rugen::make_description(#{#object_tokens}, line!())?).into_token_stream(cx)?)
+}
 
 #[cfg(feature = "fmt")]
 pub fn format_rune_script(script: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -51,34 +136,34 @@ pub fn format_rune_script(script: &Path) -> Result<(), Box<dyn std::error::Error
 
 #[derive(Any, thiserror::Error, Debug)]
 pub enum DescriptionError {
-    #[error("Invalid range start {0}")]
-    InvalidRangeStart(String),
-    #[error("Invalid range end {0}")]
-    InvalidRangeEnd(String),
-    #[error("Unsupported type {0}")]
-    UnsupportedType(String),
-    #[error("Vec must have at least one value to choose from {0}")]
-    NoValueToChooseFrom(String),
-    #[error("Min and max of range must be of the same type {0}")]
-    MinMaxTypeMismatch(String),
-    #[error("Invalid probability: {0}! Value must be between 0 and 1 inclusive {1}")]
-    InvalidProbability(String, f64),
-    #[error("Count must be non-negative {0}")]
-    CountMustBeNonNegative(String),
-    #[error("Could not convert value to expected type: {0} {1}")]
-    ConversionError(String, String),
+    #[error("Invalid range start{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    InvalidRangeStart(Option<i64>),
+    #[error("Invalid range end{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    InvalidRangeEnd(Option<i64>),
+    #[error("Unsupported type{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    UnsupportedType(Option<i64>),
+    #[error("Vec must have at least one value to choose from{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    NoValueToChooseFrom(Option<i64>),
+    #[error("Min and max of range must be of the same type{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    MinMaxTypeMismatch(Option<i64>),
+    #[error("Invalid probability: {}{}", .0, .1.map_or("".to_string(), |v| format!(" at line {v}")))]
+    InvalidProbability(f64, Option<i64>),
+    #[error("Count must be non-negative{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    CountMustBeNonNegative(Option<i64>),
+    #[error("Could not convert value to expected type: {}{}", .0, .1.map_or("".to_string(), |v| format!(" at line {v}")))]
+    ConversionError(String, Option<i64>),
 }
 
 #[derive(Any, thiserror::Error, Debug)]
 pub enum EvaluationError {
     #[error("Vec must have at least one value to choose from")]
     NoValueToChooseFrom,
-    #[error("RuntimeError: {0} {1}")]
-    RuntimeError(RuntimeError, String),
-    #[error("alloc::Error: {0} {1}")]
-    AllocError(alloc::Error, String),
-    #[error("WeightError: {0} {1}")]
-    WeightError(WeightError, String),
+    #[error("RuntimeError: {0}")]
+    RuntimeError(#[from] RuntimeError),
+    #[error("alloc::Error: {0}")]
+    AllocError(#[from] alloc::Error),
+    #[error("WeightError: {0}")]
+    WeightError(#[from] WeightError),
 }
 
 #[derive(Any, thiserror::Error, Debug)]
@@ -162,10 +247,7 @@ enum Marker {
 }
 
 #[expect(clippy::too_many_lines)]
-fn evaluate_inner(
-    description: &DataDescription,
-    mut path: PathHelper,
-) -> Result<Value, EvaluationError> {
+fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationError> {
     let mut rng = rand::rng();
     match description {
         DataDescription::Just(v) => Ok(v.clone()),
@@ -173,16 +255,13 @@ fn evaluate_inner(
             let s: String = rng
                 .sample_iter(rand::distr::Alphanumeric)
                 .take(
-                    evaluate_inner(len, path.join("<len>".to_string()))?
+                    generate_inner(len)?
                         .as_usize()
-                        .map_err(|e| {
-                            EvaluationError::RuntimeError(e, path_to_location_string(&path))
-                        })?,
+                        .map_err(|e| EvaluationError::RuntimeError(e))?,
                 )
                 .map(char::from)
                 .collect();
-            Ok(rune::to_value(s)
-                .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?)
+            Ok(rune::to_value(s).map_err(|e| EvaluationError::RuntimeError(e))?)
         }
         DataDescription::Choice(values) => {
             if values.is_empty() {
@@ -190,60 +269,57 @@ fn evaluate_inner(
             }
             let mut rng = rand::rng();
             let i = rng.random_range(0..values.len());
-            evaluate_inner(&values[i], path.join(i))
+            generate_inner(&values[i])
         }
         DataDescription::VariableLengthArray { count, value } => Ok(rune::to_value(
-            (0..evaluate_inner(count, path.join("<count>".to_string()))?
+            (0..generate_inner(count)?
                 .as_usize()
-                .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?)
-                .map(|i| evaluate_inner(value, path.join(i)))
+                .map_err(|e| EvaluationError::RuntimeError(e))?)
+                .map(|_| generate_inner(value))
                 .collect::<Result<Vec<Value>, EvaluationError>>()?,
         )
-        .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?),
+        .map_err(|e| EvaluationError::RuntimeError(e))?),
         #[expect(clippy::cast_sign_loss)]
         #[expect(clippy::cast_possible_truncation)]
         DataDescription::FixedLengthArray { count, value } => Ok(rune::to_value(
             (0..*count)
-                .map(|i| evaluate_inner(value, path.join(i as usize)))
+                .map(|_| generate_inner(value))
                 .collect::<Result<Vec<Value>, EvaluationError>>()?,
         )
-        .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?),
+        .map_err(|e| EvaluationError::RuntimeError(e))?),
         DataDescription::Object(obj) => {
             let mut new_obj = Object::new();
             for (k, v) in obj {
                 let mut new_str = RuneString::new();
                 new_str
                     .try_push_str(k)
-                    .map_err(|e| EvaluationError::AllocError(e, path_to_location_string(&path)))?;
+                    .map_err(|e| EvaluationError::AllocError(e))?;
                 new_obj
-                    .insert(
-                        new_str,
-                        evaluate_inner(v, path.join(k.as_str().to_string()))?,
-                    )
-                    .map_err(|e| EvaluationError::AllocError(e, path_to_location_string(&path)))?;
+                    .insert(new_str, generate_inner(v)?)
+                    .map_err(|e| EvaluationError::AllocError(e))?;
             }
-            Ok(rune::to_value(new_obj)
-                .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?)
+            Ok(rune::to_value(new_obj).map_err(|e| EvaluationError::RuntimeError(e))?)
         }
         DataDescription::Optional { p, value } => {
             let mut rng = rand::rng();
             Ok(rune::to_value(
                 (rng.random::<f64>() < *p)
-                    .then(|| evaluate_inner(value, path.join("?".to_string())))
+                    .then(|| generate_inner(value))
                     .transpose()?,
             )
-            .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?)
+            .map_err(|e| EvaluationError::RuntimeError(e))?)
         }
         DataDescription::Vec(values) => {
             let mut v = Vec::new();
-            for (i, desc) in values.iter().enumerate() {
-                v.push(evaluate_inner(desc, path.join(i))?);
+            for desc in values.iter() {
+                v.push(generate_inner(desc)?);
             }
-            Ok(rune::to_value(v)
-                .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?)
+            Ok(rune::to_value(v).map_err(|e| EvaluationError::RuntimeError(e))?)
         }
-        DataDescription::Bool => Ok(rune::to_value(rng.random::<bool>())
-            .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?),
+        DataDescription::Bool => {
+            Ok(rune::to_value(rng.random::<bool>())
+                .map_err(|e| EvaluationError::RuntimeError(e))?)
+        }
         DataDescription::UInt {
             min,
             max,
@@ -253,7 +329,7 @@ fn evaluate_inner(
         } else {
             rng.random_range(*min..*max)
         })
-        .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?),
+        .map_err(|e| EvaluationError::RuntimeError(e))?),
         DataDescription::Int {
             min,
             max,
@@ -263,7 +339,7 @@ fn evaluate_inner(
         } else {
             rng.random_range(*min..*max)
         })
-        .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?),
+        .map_err(|e| EvaluationError::RuntimeError(e))?),
         DataDescription::Char {
             min,
             max,
@@ -273,7 +349,7 @@ fn evaluate_inner(
         } else {
             rng.random_range(*min..*max)
         })
-        .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?),
+        .map_err(|e| EvaluationError::RuntimeError(e))?),
         DataDescription::Float {
             min,
             max,
@@ -283,92 +359,64 @@ fn evaluate_inner(
         } else {
             rng.random_range(*min..*max)
         })
-        .map_err(|e| EvaluationError::RuntimeError(e, path_to_location_string(&path)))?),
+        .map_err(|e| EvaluationError::RuntimeError(e))?),
         DataDescription::Weighted(values) => {
             let indexed = values.iter().enumerate().collect::<Vec<_>>();
             let (i, _) = indexed
                 .choose_weighted(&mut rng, |v| v.1.0)
-                .map_err(|e| EvaluationError::WeightError(e, path_to_location_string(&path)))?;
-            Ok(
-                rune::to_value(evaluate_inner(&values[*i].1, path.join(*i))?).map_err(|e| {
-                    EvaluationError::RuntimeError(e, path_to_location_string(&path))
-                })?,
-            )
+                .map_err(|e| EvaluationError::WeightError(e))?;
+            Ok(rune::to_value(generate_inner(&values[*i].1)?)
+                .map_err(|e| EvaluationError::RuntimeError(e))?)
         }
     }
 }
 
-pub fn evaluate(description: &DataDescription) -> Result<Value, EvaluationError> {
-    let path = PathHelper {
-        root: true,
-        inner: &mut Vec::new(),
-    };
-    evaluate_inner(description, path)
+#[rune::function]
+pub fn generate(description: DataDescription) -> Result<Value, EvaluationError> {
+    generate_inner(&description)
+}
+
+#[rune::function(instance, path = generate)]
+pub fn generate_instance(description: DataDescription) -> Result<Value, EvaluationError> {
+    generate_inner(&description)
 }
 
 pub fn checked_from_value<T: FromValue>(value: &Value) -> Result<T, DescriptionError> {
-    checked_from_value_inner(
-        value,
-        &PathHelper {
-            root: true,
-            inner: &mut Vec::new(),
-        },
-    )
+    checked_from_value_inner(value, None)
 }
 
 fn checked_from_value_inner<T: FromValue>(
     value: &Value,
-    path: &PathHelper,
+    line: Option<i64>,
 ) -> Result<T, DescriptionError> {
     let res = if let Ok(v) = rune::from_value::<Result<Value, DescriptionError>>(value) {
         rune::from_value(v?)
     } else {
         rune::from_value(value.to_owned())
     };
-    res.map_err(|_| {
-        DescriptionError::ConversionError(
-            type_name::<T>().to_owned(),
-            path_to_location_string(path),
-        )
+    res.map_err(|e| {
+        println!("{:?}", e);
+        DescriptionError::ConversionError(type_name::<T>().to_owned(), line)
     })
-}
-
-fn path_to_location_string(path: &PathHelper) -> String {
-    format!(
-        "(path: /{})",
-        path.inner
-            .iter()
-            .map(|s| match s {
-                Segment::USize(i) => format!("@~[{i}]~@"),
-                Segment::Key(k) => k.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join("/")
-            .replace("/@~[", "[")
-            .replace("]~@/", "]/")
-            .replace("]~@", "]")
-    )
 }
 
 fn range_impl(
     min: &Value,
     max: &Value,
     inclusive: bool,
-    path: &PathHelper,
+    line: Option<i64>,
 ) -> Result<DataDescription, DescriptionError> {
     if min.type_info() != max.type_info() {
-        return Err(DescriptionError::MinMaxTypeMismatch(
-            path_to_location_string(path),
-        ));
+        return Err(DescriptionError::MinMaxTypeMismatch(line));
     }
     match min {
         min if min.as_integer::<u64>().is_ok() => {
             let min = min
                 .as_integer::<u64>()
-                .map_err(|_| DescriptionError::InvalidRangeStart(path_to_location_string(path)))?;
+                .map_err(|_| DescriptionError::InvalidRangeStart(line))?;
             let max = max
                 .as_integer::<u64>()
-                .map_err(|_| DescriptionError::InvalidRangeEnd(path_to_location_string(path)))?;
+                .map_err(|_| DescriptionError::InvalidRangeEnd(line))?;
 
             Ok(DataDescription::UInt {
                 min,
@@ -379,10 +427,10 @@ fn range_impl(
         min if min.as_integer::<i64>().is_ok() => {
             let min = min
                 .as_integer::<i64>()
-                .map_err(|_| DescriptionError::InvalidRangeStart(path_to_location_string(path)))?;
+                .map_err(|_| DescriptionError::InvalidRangeStart(line))?;
             let max = max
                 .as_integer::<i64>()
-                .map_err(|_| DescriptionError::InvalidRangeEnd(path_to_location_string(path)))?;
+                .map_err(|_| DescriptionError::InvalidRangeEnd(line))?;
             Ok(DataDescription::Int {
                 min,
                 max,
@@ -392,10 +440,10 @@ fn range_impl(
         min if min.as_float().is_ok() => {
             let min = min
                 .as_float()
-                .map_err(|_| DescriptionError::InvalidRangeStart(path_to_location_string(path)))?;
+                .map_err(|_| DescriptionError::InvalidRangeStart(line))?;
             let max = max
                 .as_float()
-                .map_err(|_| DescriptionError::InvalidRangeEnd(path_to_location_string(path)))?;
+                .map_err(|_| DescriptionError::InvalidRangeEnd(line))?;
             Ok(DataDescription::Float {
                 min,
                 max,
@@ -405,19 +453,17 @@ fn range_impl(
         min if min.as_char().is_ok() => {
             let min = min
                 .as_char()
-                .map_err(|_| DescriptionError::InvalidRangeStart(path_to_location_string(path)))?;
+                .map_err(|_| DescriptionError::InvalidRangeStart(line))?;
             let max = max
                 .as_char()
-                .map_err(|_| DescriptionError::InvalidRangeEnd(path_to_location_string(path)))?;
+                .map_err(|_| DescriptionError::InvalidRangeEnd(line))?;
             Ok(DataDescription::Char {
                 min,
                 max,
                 inclusive,
             })
         }
-        _ => Err(DescriptionError::UnsupportedType(path_to_location_string(
-            path,
-        ))),
+        _ => Err(DescriptionError::UnsupportedType(line)),
     }
 }
 
@@ -469,29 +515,26 @@ fn value_max(value: &Value) -> Option<Value> {
 
 fn try_build_from_marker_inner(
     desc: &Marker,
-    path: &mut PathHelper,
+    line: Option<i64>,
 ) -> Result<DataDescription, DescriptionError> {
     match desc {
         Marker::Bool => Ok(DataDescription::Bool),
         Marker::String { len } => Ok(DataDescription::String {
-            len: Box::new(try_build_description_inner(len, path.join("<len>"))?),
+            len: Box::new(try_build_description_inner(len, line)?),
         }),
         Marker::Range {
             min,
             max,
             inclusive,
-        } => range_impl(min, max, *inclusive, path),
+        } => Ok(range_impl(min, max, *inclusive, line)?),
         Marker::Choice(values) => {
             if values.is_empty() {
-                Err(DescriptionError::NoValueToChooseFrom(
-                    path_to_location_string(path),
-                ))
+                Err(DescriptionError::NoValueToChooseFrom(line))
             } else {
                 Ok(DataDescription::Choice(
                     values
                         .iter()
-                        .enumerate()
-                        .map(|(i, v)| try_build_description_inner(v, path.join(i)))
+                        .map(|v| try_build_description_inner(v, line))
                         .collect::<Result<Vec<DataDescription>, DescriptionError>>()?,
                 ))
             }
@@ -499,41 +542,25 @@ fn try_build_from_marker_inner(
         Marker::Weighted(values) => Ok(DataDescription::Weighted(
             values
                 .iter()
-                .enumerate()
-                .map(|(i, (w, v))| try_build_description_inner(v, path.join(i)).map(|v| (*w, v)))
+                .map(|(w, v)| try_build_description_inner(v, line).map(|v| (*w, v)))
                 .collect::<Result<Vec<(u32, DataDescription)>, DescriptionError>>()?,
         )),
         Marker::FixedLengthArray { count, value } => Ok(DataDescription::FixedLengthArray {
             count: *count,
-            value: Box::new(try_build_description_inner(
-                value,
-                path.join("<value>".to_string()),
-            )?),
+            value: Box::new(try_build_description_inner(value, line)?),
         }),
         Marker::VariableLengthArray { count, value } => Ok(DataDescription::VariableLengthArray {
-            count: Box::new(try_build_description_inner(
-                count,
-                path.join("<count>".to_string()),
-            )?),
-            value: Box::new(try_build_description_inner(
-                value,
-                path.join("<value>".to_string()),
-            )?),
+            count: Box::new(try_build_description_inner(count, line)?),
+            value: Box::new(try_build_description_inner(value, line)?),
         }),
         Marker::Optional { p, value } => {
-            let p = checked_from_value_inner(p, path)?;
+            let p = checked_from_value_inner(p, line)?;
             if !(0.0..=1.0).contains(&p) {
-                return Err(DescriptionError::InvalidProbability(
-                    path_to_location_string(path),
-                    p,
-                ));
+                return Err(DescriptionError::InvalidProbability(p, line));
             }
             Ok(DataDescription::Optional {
                 p,
-                value: Box::new(try_build_description_inner(
-                    value,
-                    path.join("<value>".to_string()),
-                )?),
+                value: Box::new(try_build_description_inner(value, line)?),
             })
         }
     }
@@ -541,50 +568,42 @@ fn try_build_from_marker_inner(
 
 fn try_build_description_inner(
     value: &Value,
-    mut path: PathHelper,
+    line: Option<i64>,
 ) -> Result<DataDescription, DescriptionError> {
-    let value = checked_from_value_inner(value, &path)?;
+    let value = checked_from_value_inner(value, line)?;
     if let Ok(desc) = rune::from_value::<DataDescription>(&value) {
         Ok(desc)
     } else if let Ok(desc) = rune::from_value::<Result<Marker, DescriptionError>>(&value) {
         Ok(try_build_description_inner(
             &rune::to_value(desc?).expect("Marker should always be able to convert to value"),
-            path,
+            line,
         )?)
     } else if let Ok(desc) = rune::from_value::<Marker>(&value) {
-        try_build_from_marker_inner(&desc, &mut path)
+        try_build_from_marker_inner(&desc, line)
     } else if let Ok(obj) = rune::from_value::<Object>(&value) {
         Ok(DataDescription::Object(
             obj.into_iter()
                 .map(|(k, v)| {
-                    try_build_description_inner(&v, path.join(k.as_str().to_string()))
-                        .map(|v| (k.as_str().to_string(), v))
+                    try_build_description_inner(&v, line).map(|v| (k.as_str().to_string(), v))
                 })
                 .collect::<Result<_, _>>()?,
         ))
     } else if let Ok(range) = rune::from_value::<Range>(&value) {
-        range_impl(&range.start, &range.end, false, &path)
+        Ok(range_impl(&range.start, &range.end, false, line)?)
     } else if let Ok(range) = rune::from_value::<RangeInclusive>(&value) {
-        range_impl(&range.start, &range.end, true, &path)
+        Ok(range_impl(&range.start, &range.end, true, line)?)
     } else if let Ok(range) = rune::from_value::<RangeFrom>(&value) {
-        let max = value_max(&range.start).ok_or(DescriptionError::UnsupportedType(
-            path_to_location_string(&path),
-        ))?;
-        range_impl(&range.start, &max, true, &path)
+        let max = value_max(&range.start).ok_or(DescriptionError::UnsupportedType(line))?;
+        Ok(range_impl(&range.start, &max, true, line)?)
     } else if let Ok(range) = rune::from_value::<RangeTo>(&value) {
-        let min = value_min(&range.end).ok_or(DescriptionError::UnsupportedType(
-            path_to_location_string(&path),
-        ))?;
-        range_impl(&min, &range.end, false, &path)
+        let min = value_min(&range.end).ok_or(DescriptionError::UnsupportedType(line))?;
+        Ok(range_impl(&min, &range.end, false, line)?)
     } else if rune::from_value::<RangeFull>(&value).is_ok() {
-        Err(DescriptionError::UnsupportedType(path_to_location_string(
-            &path,
-        )))
+        Err(DescriptionError::UnsupportedType(line))
     } else if let Ok(s) = rune::from_value::<Vec<Value>>(&value) {
         Ok(DataDescription::Vec(
             s.into_iter()
-                .enumerate()
-                .map(|(i, v)| try_build_description_inner(&v, path.join(i)))
+                .map(|v| try_build_description_inner(&v, line))
                 .collect::<Result<_, _>>()?,
         ))
     } else {
@@ -592,14 +611,11 @@ fn try_build_description_inner(
     }
 }
 
-pub fn try_build_description(value: &Value) -> Result<DataDescription, DescriptionError> {
-    try_build_description_inner(
-        value,
-        PathHelper {
-            inner: &mut Vec::new(),
-            root: true,
-        },
-    )
+pub fn try_build_description(
+    value: &Value,
+    line: Option<i64>,
+) -> Result<DataDescription, DescriptionError> {
+    try_build_description_inner(value, line)
 }
 
 #[rune::function]
@@ -638,9 +654,13 @@ fn optional(p: Value, value: Value) -> Marker {
 }
 
 #[rune::function]
-#[expect(clippy::needless_pass_by_value)]
-fn describe(this: Value) -> Result<DataDescription, DescriptionError> {
-    try_build_description(&this)
+fn make_description(this: Value, line: i64) -> Result<DataDescription, DescriptionError> {
+    try_build_description(&this, Some(line))
+}
+
+#[rune::function]
+fn to_description(this: Value) -> Result<DataDescription, DescriptionError> {
+    try_build_description(&this, None)
 }
 
 fn bit_or(left: Object, right: Value) -> Marker {
@@ -692,8 +712,14 @@ pub fn module() -> Result<Module, ContextError> {
     m.ty::<Marker>()?;
     m.ty::<DataDescription>()?;
     m.ty::<Alpha>()?;
+
+    m.macro_meta(describe)?;
+
     m.constant("ALPHA", Alpha {}).build()?;
-    m.function_meta(describe)?;
+    m.function_meta(make_description)?;
+    m.function_meta(to_description)?;
+    m.function_meta(generate_instance)?;
+    m.function_meta(generate)?;
     m.function_meta(bool)?;
     m.function_meta(string)?;
     m.function_meta(optional)?;
@@ -709,54 +735,4 @@ pub fn module() -> Result<Module, ContextError> {
     m.associated_function(&Protocol::BIT_OR, bit_or)?;
     m.associated_function(&Protocol::BIT_OR, bit_or_marker)?;
     Ok(m)
-}
-
-enum Segment {
-    USize(usize),
-    Key(String),
-}
-
-trait ToSegment {
-    fn to_segment(self) -> Segment;
-}
-
-impl ToSegment for usize {
-    fn to_segment(self) -> Segment {
-        Segment::USize(self)
-    }
-}
-
-impl ToSegment for &str {
-    fn to_segment(self) -> Segment {
-        Segment::Key(self.to_string())
-    }
-}
-
-impl ToSegment for String {
-    fn to_segment(self) -> Segment {
-        Segment::Key(self)
-    }
-}
-
-struct PathHelper<'a> {
-    root: bool,
-    inner: &'a mut Vec<Segment>,
-}
-
-impl PathHelper<'_> {
-    fn join<T: ToSegment>(&mut self, segment: T) -> PathHelper<'_> {
-        self.inner.push(segment.to_segment());
-        PathHelper {
-            inner: self.inner,
-            root: false,
-        }
-    }
-}
-
-impl Drop for PathHelper<'_> {
-    fn drop(&mut self) {
-        if !self.root {
-            self.inner.pop();
-        }
-    }
 }
