@@ -19,7 +19,6 @@ use rune::{
 #[cfg(feature = "fmt")]
 use rune::{Diagnostics, Source, Sources};
 
-use rune::T;
 use rune::ast;
 use rune::compile;
 use rune::macros::{MacroContext, TokenStream, quote};
@@ -27,11 +26,25 @@ use rune::parse::Parser;
 
 fn parse_expr<'a>(
     cx: &mut MacroContext<'_, '_, '_>,
-    expr: ast::Expr,
+    expr: &'a ast::Expr,
 ) -> compile::Result<Quote<'a>> {
     let span = expr.span();
     let start = cx.lit(span.start.into_usize())?;
     match expr {
+        ast::Expr::Binary(ast::ExprBinary {
+            lhs,
+            op: ast::BinOp::BitOr(_),
+            rhs,
+            ..
+        }) => {
+            let start_l = cx.lit(lhs.span().start.into_usize())?;
+            let start_r = cx.lit(rhs.span().start.into_usize())?;
+            let lhs = parse_expr(cx, &lhs)?;
+            let rhs = parse_expr(cx, &rhs)?;
+            Ok(
+                quote!(rugen::__to_description(#lhs, rugen::__get_line(#start_l))? | rugen::__to_description(#rhs, rugen::__get_line(#start_r))?),
+            )
+        }
         ast::Expr::Binary(ast::ExprBinary {
             lhs,
             op: ast::BinOp::Mul(_),
@@ -40,10 +53,10 @@ fn parse_expr<'a>(
         }) => Ok(quote!(rugen::__to_description(#lhs * #rhs, rugen::__get_line(#start))?)),
         ast::Expr::Object(o) => {
             let mut result = quote!();
-            for a in o.assignments {
-                let name = a.0.key;
-                if let Some((_, expr)) = a.0.assign {
-                    let rhs = parse_expr(cx, expr)?;
+            for a in &o.assignments {
+                let name = &a.0.key;
+                if let Some((_, expr)) = &a.0.assign {
+                    let rhs = parse_expr(cx, &expr)?;
                     result = quote!(#result #name: #rhs,);
                 }
             }
@@ -51,8 +64,8 @@ fn parse_expr<'a>(
         }
         ast::Expr::Vec(v) => {
             let mut result = quote!();
-            for a in v.items {
-                let v = parse_expr(cx, a.0)?;
+            for a in &v.items {
+                let v = parse_expr(cx, &a.0)?;
                 result = quote!(#result #v,);
             }
             Ok(quote!([#result]))
@@ -68,43 +81,15 @@ fn describe(
     stream: &TokenStream,
 ) -> compile::Result<TokenStream> {
     let mut parser = Parser::from_token_stream(stream, cx.input_span());
-
-    let mut fields = Vec::new();
-
-    while !parser.is_eof()? {
-        let key = if parser.peek::<ast::Ident>()? {
-            let ident = parser.parse::<ast::Ident>()?;
-            quote!(#ident)
-        } else {
-            let lit = parser.parse::<ast::LitStr>()?;
-            quote!(#lit)
-        };
-
-        parser.parse::<T![:]>()?;
-
-        let value = parse_expr(cx, parser.parse::<ast::Expr>()?)?;
-
-        fields.push((key, value));
-
-        if parser.parse::<Option<T![,]>>()?.is_none() {
-            break;
-        }
-    }
+    let expr = parser.parse::<ast::Expr>()?;
+    let value = parse_expr(cx, &expr)?;
 
     parser.eof()?;
-
-    let mut object_tokens = quote!();
-    for (i, (key, value)) in fields.iter().enumerate() {
-        if i > 0 {
-            object_tokens = quote!(#object_tokens,); // Add a comma between fields
-        }
-        object_tokens = quote!(#object_tokens #key: #value);
-    }
 
     let span = cx.input_span();
     let start = cx.lit(span.start.into_usize())?;
     Ok(
-        quote!(rugen::__to_description(#{#object_tokens}, rugen::__get_line(#start))?)
+        quote!(rugen::__to_description(#value, rugen::__get_line(#start))?)
             .into_token_stream(cx)?,
     )
 }
@@ -181,7 +166,7 @@ pub enum RuGenError {
     EvaluationError(#[from] EvaluationError),
 }
 
-#[derive(Any, Debug)]
+#[derive(Any, Debug, Clone)]
 pub enum DataDescription {
     Bool,
     Just(Value),
@@ -687,6 +672,27 @@ fn bit_or_marker(left: Marker, right: Value) -> Marker {
     }
 }
 
+fn bit_or_desc(left: DataDescription, right: DataDescription) -> DataDescription {
+    match (&left, &right) {
+        (DataDescription::Choice(values), DataDescription::Choice(values_r)) => {
+            let mut values = values.clone();
+            values.extend_from_slice(values_r);
+            DataDescription::Choice(values)
+        }
+        (DataDescription::Choice(values), _) => {
+            let mut values = values.clone();
+            values.push(right);
+            DataDescription::Choice(values)
+        }
+        (_, DataDescription::Choice(values)) => {
+            let mut values = values.clone();
+            values.push(left);
+            DataDescription::Choice(values)
+        }
+        _ => DataDescription::Choice(vec![left, right]),
+    }
+}
+
 fn mul_range(value: Range, count: Value) -> Marker {
     let value = rune::to_value(value).expect("Range should always be convertible to Value");
     if let Ok(i) = rune::from_value::<i64>(&value) {
@@ -734,5 +740,6 @@ pub fn module(source: Source) -> Result<Module, ContextError> {
     m.associated_function(&Protocol::MUL, mul_alpha)?;
     m.associated_function(&Protocol::BIT_OR, bit_or)?;
     m.associated_function(&Protocol::BIT_OR, bit_or_marker)?;
+    m.associated_function(&Protocol::BIT_OR, bit_or_desc)?;
     Ok(m)
 }

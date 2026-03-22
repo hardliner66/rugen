@@ -1,6 +1,6 @@
 use rugen as r;
 pub fn main() {
-    rugen::describe! {
+    rugen::describe!(#{
         asdf: r::range(1, 10),
         values: #{ //
             fixed: 5.values(r::range(55.0, 128.0)),
@@ -16,5 +16,5 @@ pub fn main() {
         ),
         string: r::string(10),
         string_var: r::string(5..15),
-    }
+    })
 }
