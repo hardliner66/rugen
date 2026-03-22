@@ -1197,6 +1197,7 @@ version = "0.16.0"
 dependencies = [
  "rand 0.10.0",
  "rune",
+ "serde",
  "thiserror",
 ]
 

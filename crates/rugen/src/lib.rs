@@ -8,7 +8,7 @@ use rand::{
 };
 use rune::{
     Any, ContextError, FromValue, Module, ToConstValue, Value,
-    alloc::{self, Result, String as RuneString},
+    alloc::{self, String as RuneString},
     ast::Spanned,
     macros::Quote,
     runtime::{
@@ -250,6 +250,10 @@ enum Marker {
     },
 }
 
+pub fn generate(description: &DataDescription) -> GenerationResult {
+    GenerationResult(generate_inner(description))
+}
+
 #[expect(clippy::too_many_lines)]
 fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationError> {
     let mut rng = rand::rng();
@@ -375,14 +379,25 @@ fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationErro
     }
 }
 
+#[derive(Any)]
+pub struct GenerationResult(Result<Value, EvaluationError>);
+
+impl TryInto<Value> for GenerationResult {
+    type Error = EvaluationError;
+
+    fn try_into(self) -> Result<Value, Self::Error> {
+        self.0
+    }
+}
+
 #[rune::function]
-pub fn generate(description: DataDescription) -> Result<Value, EvaluationError> {
-    generate_inner(&description)
+pub fn generate_fn(description: &DataDescription) -> GenerationResult {
+    GenerationResult(generate_inner(description))
 }
 
 #[rune::function(instance, path = generate)]
-pub fn generate_instance(description: DataDescription) -> Result<Value, EvaluationError> {
-    generate_inner(&description)
+pub fn generate_instance(description: &DataDescription) -> GenerationResult {
+    GenerationResult(generate_inner(description))
 }
 
 pub fn checked_from_value<T: FromValue>(value: &Value) -> Result<T, DescriptionError> {
@@ -583,7 +598,7 @@ fn try_build_description_inner(
             line,
         )?)
     } else if let Ok(desc) = rune::from_value::<Marker>(&value) {
-        try_build_from_marker_inner(&desc, line)
+        Ok(try_build_from_marker_inner(&desc, line)?)
     } else if let Ok(obj) = rune::from_value::<Object>(&value) {
         Ok(DataDescription::Object(
             obj.into_iter()
@@ -764,7 +779,7 @@ pub fn module() -> Result<Module, ContextError> {
     m.function_meta(make_description)?;
     m.function_meta(to_description)?;
     m.function_meta(generate_instance)?;
-    m.function_meta(generate)?;
+    m.function_meta(generate_fn)?;
     m.function_meta(bool)?;
     m.function_meta(string)?;
     m.function_meta(optional)?;

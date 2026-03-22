@@ -12,6 +12,7 @@ readme.workspace = true
 rune = "0.14.1"
 rand = "0.10.0"
 thiserror = "2.0.18"
+serde = { version = "1.0.228", features = ["derive"] }
 
 [features]
 default = []

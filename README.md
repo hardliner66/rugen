@@ -57,7 +57,7 @@ and you see how the implicit api works under the hood (at least conceptually).
 ```rs
 use rugen as r;
 pub fn main() {
-    r::describe(#{
+    r::describe! {
         asdf: r::range(1, 10),
         values: r::array(5, r::range(55.0, 128.0)),
         choice: r::choose(
@@ -68,11 +68,11 @@ pub fn main() {
                 r::object(#{ D: r::string(10) }),
             ],
         ),
-    })
+    }.generate()?
 }
 ```
 
-You start a description with `describe`, then you use the appropriate functions to compose your data description from its building blocks.
+You start a description with the `describe` macro, then you use the appropriate functions to compose your data description from its building blocks.
 Using a value directly represents the value itself, so `10` will always evaluate to `10`. `range` evaluates to a random value, according to the values you pass.
 
 To try this example locally, make sure you have rugen-cli installed, then either clone the repository or download the fire from [examples/explicit.rn](./examples/explicit.rn), then you can run it with `rugen path/to/explicit.rn`.

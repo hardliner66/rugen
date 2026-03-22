@@ -2,9 +2,10 @@ use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use rugen::{
-    DescriptionError, fix_line_number, module,
+    DataDescription, DescriptionError, GenerationResult, module,
     rune::{
-        Diagnostics, Source, SourceId, Sources, Value, Vm,
+        Diagnostics, Source, Sources, Vm,
+        alloc::Result,
         termcolor::{ColorChoice, StandardStream},
     },
 };
@@ -55,10 +56,14 @@ fn generate(pretty: bool, script: &PathBuf, output: Option<PathBuf>) -> anyhow::
     let output_string = if let Ok(string_result) = rugen::rune::from_value::<String>(&result) {
         string_result
     } else {
-        let value = if let Ok(value) =
-            rugen::rune::from_value::<Result<Value, DescriptionError>>(&result)
+        let value = if let Ok(value) = rugen::rune::from_value::<DataDescription>(&result) {
+            rugen::generate(&value).try_into()?
+        } else if let Ok(value) =
+            rugen::rune::from_value::<Result<DataDescription, DescriptionError>>(&result)
         {
-            value.map_err(|e| fix_line_number(e, &sources.get(SourceId::new(0)).unwrap()))?
+            rugen::generate(&value?).try_into()?
+        } else if let Ok(value) = rugen::rune::from_value::<GenerationResult>(&result) {
+            value.try_into()?
         } else {
             result
         };
