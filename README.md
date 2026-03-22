@@ -57,7 +57,7 @@ and you see how the implicit api works under the hood (at least conceptually).
 ```rs
 use rugen as r;
 pub fn main() {
-    r::describe! {
+    r::describe!(#{
         asdf: r::range(1, 10),
         values: r::array(5, r::range(55.0, 128.0)),
         choice: r::choose(
@@ -68,7 +68,7 @@ pub fn main() {
                 r::object(#{ D: r::string(10) }),
             ],
         ),
-    }
+    })
 }
 ```
 
@@ -95,7 +95,7 @@ data as JSON, so there is no need to have the limits from the ranges *AND* the l
 use rugen::ALPHA;
 
 pub fn main() {
-     rugen::describe! {
+     rugen::describe!(#{
         asdf: 1..10,
         values: #{ //
             fixed: (55.0..128.0) * 5,
@@ -109,7 +109,7 @@ pub fn main() {
               | #{ D: ALPHA * 10 },
         string: ALPHA * 10,
         string_var: ALPHA * (5..15),
-    }
+    })
 }
 ```
 
