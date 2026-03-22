@@ -2,10 +2,10 @@ use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use rugen::{
-    DataDescription, DescriptionError, module,
+    module,
     rune::{
         Diagnostics, Source, Sources, Vm,
-        alloc::{Result, clone::TryClone},
+        alloc::clone::TryClone,
         termcolor::{ColorChoice, StandardStream},
     },
 };
@@ -57,20 +57,7 @@ fn generate(pretty: bool, script: &PathBuf, output: Option<PathBuf>) -> anyhow::
     let output_string = if let Ok(string_result) = rugen::rune::from_value::<String>(&result) {
         string_result
     } else {
-        let value = if let Ok(value) = rugen::rune::from_value::<DataDescription>(&result) {
-            rugen::generate(&value)?
-        } else if let Ok(value) =
-            rugen::rune::from_value::<Result<DataDescription, DescriptionError>>(&result)
-        {
-            rugen::generate(&value?)?
-        } else {
-            result
-        };
-        // {
-        //     result?
-        // } else {
-        //     rugen::checked_from_value::<Value>(&result)?
-        // };
+        let value = rugen::generate(result)?;
         if pretty {
             serde_json::to_string_pretty(&value)?
         } else {

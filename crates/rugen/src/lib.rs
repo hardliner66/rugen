@@ -16,8 +16,9 @@ use rune::{
     },
 };
 
+use rune::Source;
 #[cfg(feature = "fmt")]
-use rune::{Diagnostics, Source, Sources};
+use rune::{Diagnostics, Sources};
 
 use rune::ast;
 use rune::compile;
@@ -238,8 +239,15 @@ enum Marker {
     },
 }
 
-pub fn generate(description: &DataDescription) -> Result<Value, EvaluationError> {
-    generate_inner(description)
+pub fn generate(value: Value) -> Result<Value, RuGenError> {
+    if let Ok(value) = rune::from_value::<DataDescription>(&value) {
+        Ok(generate_inner(&value)?)
+    } else if let Ok(value) = rune::from_value::<Result<DataDescription, DescriptionError>>(&value)
+    {
+        Ok(generate_inner(&value?)?)
+    } else {
+        Ok(value)
+    }
 }
 
 #[expect(clippy::too_many_lines)]
@@ -362,18 +370,6 @@ fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationErro
                 .map_err(EvaluationError::RuntimeError)?)
         }
     }
-}
-
-pub fn generate_fn(description: &DataDescription) -> Result<Value, EvaluationError> {
-    generate_inner(description)
-}
-
-pub fn generate_instance(description: &DataDescription) -> Result<Value, EvaluationError> {
-    generate_inner(description)
-}
-
-pub fn checked_from_value<T: FromValue>(value: &Value) -> Result<T, DescriptionError> {
-    checked_from_value_inner(value, None)
 }
 
 fn checked_from_value_inner<T: FromValue>(
@@ -599,13 +595,6 @@ fn try_build_description_inner(
     }
 }
 
-pub fn try_build_description(
-    value: &Value,
-    line: Option<usize>,
-) -> Result<DataDescription, DescriptionError> {
-    try_build_description_inner(value, line)
-}
-
 #[rune::function]
 fn bool() -> Marker {
     Marker::Bool
@@ -644,7 +633,7 @@ fn optional(p: Value, value: Value) -> Marker {
 #[rune::function]
 #[expect(clippy::needless_pass_by_value)]
 fn __to_description(this: Value, pos: usize) -> Result<DataDescription, DescriptionError> {
-    try_build_description(&this, Some(pos))
+    try_build_description_inner(&this, Some(pos))
 }
 
 fn bit_or(left: Object, right: Value) -> Marker {
