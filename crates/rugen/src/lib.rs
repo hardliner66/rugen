@@ -37,7 +37,7 @@ fn parse_expr<'a>(
             op: ast::BinOp::Mul(_),
             rhs,
             ..
-        }) => Ok(quote!(rugen::make_description(#lhs * #rhs, #start)?)),
+        }) => Ok(quote!(rugen::__to_description(#lhs * #rhs, rugen::__get_line(#start))?)),
         ast::Expr::Object(o) => {
             let mut result = quote!();
             for a in o.assignments {
@@ -57,7 +57,7 @@ fn parse_expr<'a>(
             }
             Ok(quote!([#result]))
         }
-        ast::Expr::Range(r) => Ok(quote!(rugen::make_description(#r, #start)?)),
+        ast::Expr::Range(r) => Ok(quote!(rugen::__to_description(#r, rugen::__get_line(#start))?)),
         value => Ok(quote!(#value)),
     }
 }
@@ -103,7 +103,10 @@ fn describe(
 
     let span = cx.input_span();
     let start = cx.lit(span.start.into_usize())?;
-    Ok(quote!(rugen::make_description(#{#object_tokens}, #start)?).into_token_stream(cx)?)
+    Ok(
+        quote!(rugen::__to_description(#{#object_tokens}, rugen::__get_line(#start))?)
+            .into_token_stream(cx)?,
+    )
 }
 
 #[cfg(feature = "fmt")]
@@ -133,28 +136,28 @@ pub fn format_rune_script(script: &Path) -> Result<(), Box<dyn std::error::Error
 
     let formatted = result?;
 
-    let formatted = &formatted.first().unwrap().1;
+    let formatted = &formatted[0].1;
     std::fs::write(script, formatted)?;
     Ok(())
 }
 
 #[derive(Any, thiserror::Error, Debug)]
 pub enum DescriptionError {
-    #[error("Invalid range start{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    #[error("Invalid range start{}", .0.map_or(String::new(), |v| format!(" at line {v}")))]
     InvalidRangeStart(Option<usize>),
-    #[error("Invalid range end{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    #[error("Invalid range end{}", .0.map_or(String::new(), |v| format!(" at line {v}")))]
     InvalidRangeEnd(Option<usize>),
-    #[error("Unsupported type{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    #[error("Unsupported type{}", .0.map_or(String::new(), |v| format!(" at line {v}")))]
     UnsupportedType(Option<usize>),
-    #[error("Vec must have at least one value to choose from{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    #[error("Vec must have at least one value to choose from{}", .0.map_or(String::new(), |v| format!(" at line {v}")))]
     NoValueToChooseFrom(Option<usize>),
-    #[error("Min and max of range must be of the same type{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    #[error("Min and max of range must be of the same type{}", .0.map_or(String::new(), |v| format!(" at line {v}")))]
     MinMaxTypeMismatch(Option<usize>),
-    #[error("Invalid probability: {}{}", .0, .1.map_or("".to_string(), |v| format!(" at line {v}")))]
+    #[error("Invalid probability: {}{}", .0, .1.map_or(String::new(), |v| format!(" at line {v}")))]
     InvalidProbability(f64, Option<usize>),
-    #[error("Count must be non-negative{}", .0.map_or("".to_string(), |v| format!(" at line {v}")))]
+    #[error("Count must be non-negative{}", .0.map_or(String::new(), |v| format!(" at line {v}")))]
     CountMustBeNonNegative(Option<usize>),
-    #[error("Could not convert value to expected type: {}{}", .0, .1.map_or("".to_string(), |v| format!(" at line {v}")))]
+    #[error("Could not convert value to expected type: {}{}", .0, .1.map_or(String::new(), |v| format!(" at line {v}")))]
     ConversionError(String, Option<usize>),
 }
 
@@ -250,8 +253,8 @@ enum Marker {
     },
 }
 
-pub fn generate(description: &DataDescription) -> GenerationResult {
-    GenerationResult(generate_inner(description))
+pub fn generate(description: &DataDescription) -> Result<Value, EvaluationError> {
+    generate_inner(description)
 }
 
 #[expect(clippy::too_many_lines)]
@@ -265,11 +268,11 @@ fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationErro
                 .take(
                     generate_inner(len)?
                         .as_usize()
-                        .map_err(|e| EvaluationError::RuntimeError(e))?,
+                        .map_err(EvaluationError::RuntimeError)?,
                 )
                 .map(char::from)
                 .collect();
-            Ok(rune::to_value(s).map_err(|e| EvaluationError::RuntimeError(e))?)
+            Ok(rune::to_value(s).map_err(EvaluationError::RuntimeError)?)
         }
         DataDescription::Choice(values) => {
             if values.is_empty() {
@@ -282,31 +285,29 @@ fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationErro
         DataDescription::VariableLengthArray { count, value } => Ok(rune::to_value(
             (0..generate_inner(count)?
                 .as_usize()
-                .map_err(|e| EvaluationError::RuntimeError(e))?)
+                .map_err(EvaluationError::RuntimeError)?)
                 .map(|_| generate_inner(value))
                 .collect::<Result<Vec<Value>, EvaluationError>>()?,
         )
-        .map_err(|e| EvaluationError::RuntimeError(e))?),
-        #[expect(clippy::cast_sign_loss)]
-        #[expect(clippy::cast_possible_truncation)]
+        .map_err(EvaluationError::RuntimeError)?),
         DataDescription::FixedLengthArray { count, value } => Ok(rune::to_value(
             (0..*count)
                 .map(|_| generate_inner(value))
                 .collect::<Result<Vec<Value>, EvaluationError>>()?,
         )
-        .map_err(|e| EvaluationError::RuntimeError(e))?),
+        .map_err(EvaluationError::RuntimeError)?),
         DataDescription::Object(obj) => {
             let mut new_obj = Object::new();
             for (k, v) in obj {
                 let mut new_str = RuneString::new();
                 new_str
                     .try_push_str(k)
-                    .map_err(|e| EvaluationError::AllocError(e))?;
+                    .map_err(EvaluationError::AllocError)?;
                 new_obj
                     .insert(new_str, generate_inner(v)?)
-                    .map_err(|e| EvaluationError::AllocError(e))?;
+                    .map_err(EvaluationError::AllocError)?;
             }
-            Ok(rune::to_value(new_obj).map_err(|e| EvaluationError::RuntimeError(e))?)
+            Ok(rune::to_value(new_obj).map_err(EvaluationError::RuntimeError)?)
         }
         DataDescription::Optional { p, value } => {
             let mut rng = rand::rng();
@@ -315,18 +316,17 @@ fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationErro
                     .then(|| generate_inner(value))
                     .transpose()?,
             )
-            .map_err(|e| EvaluationError::RuntimeError(e))?)
+            .map_err(EvaluationError::RuntimeError)?)
         }
         DataDescription::Vec(values) => {
             let mut v = Vec::new();
-            for desc in values.iter() {
+            for desc in values {
                 v.push(generate_inner(desc)?);
             }
-            Ok(rune::to_value(v).map_err(|e| EvaluationError::RuntimeError(e))?)
+            Ok(rune::to_value(v).map_err(EvaluationError::RuntimeError)?)
         }
         DataDescription::Bool => {
-            Ok(rune::to_value(rng.random::<bool>())
-                .map_err(|e| EvaluationError::RuntimeError(e))?)
+            Ok(rune::to_value(rng.random::<bool>()).map_err(EvaluationError::RuntimeError)?)
         }
         DataDescription::UInt {
             min,
@@ -337,7 +337,7 @@ fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationErro
         } else {
             rng.random_range(*min..*max)
         })
-        .map_err(|e| EvaluationError::RuntimeError(e))?),
+        .map_err(EvaluationError::RuntimeError)?),
         DataDescription::Int {
             min,
             max,
@@ -347,7 +347,7 @@ fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationErro
         } else {
             rng.random_range(*min..*max)
         })
-        .map_err(|e| EvaluationError::RuntimeError(e))?),
+        .map_err(EvaluationError::RuntimeError)?),
         DataDescription::Char {
             min,
             max,
@@ -357,7 +357,7 @@ fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationErro
         } else {
             rng.random_range(*min..*max)
         })
-        .map_err(|e| EvaluationError::RuntimeError(e))?),
+        .map_err(EvaluationError::RuntimeError)?),
         DataDescription::Float {
             min,
             max,
@@ -367,37 +367,24 @@ fn generate_inner(description: &DataDescription) -> Result<Value, EvaluationErro
         } else {
             rng.random_range(*min..*max)
         })
-        .map_err(|e| EvaluationError::RuntimeError(e))?),
+        .map_err(EvaluationError::RuntimeError)?),
         DataDescription::Weighted(values) => {
             let indexed = values.iter().enumerate().collect::<Vec<_>>();
             let (i, _) = indexed
                 .choose_weighted(&mut rng, |v| v.1.0)
-                .map_err(|e| EvaluationError::WeightError(e))?;
+                .map_err(EvaluationError::WeightError)?;
             Ok(rune::to_value(generate_inner(&values[*i].1)?)
-                .map_err(|e| EvaluationError::RuntimeError(e))?)
+                .map_err(EvaluationError::RuntimeError)?)
         }
     }
 }
 
-#[derive(Any)]
-pub struct GenerationResult(Result<Value, EvaluationError>);
-
-impl TryInto<Value> for GenerationResult {
-    type Error = EvaluationError;
-
-    fn try_into(self) -> Result<Value, Self::Error> {
-        self.0
-    }
+pub fn generate_fn(description: &DataDescription) -> Result<Value, EvaluationError> {
+    generate_inner(description)
 }
 
-#[rune::function]
-pub fn generate_fn(description: &DataDescription) -> GenerationResult {
-    GenerationResult(generate_inner(description))
-}
-
-#[rune::function(instance, path = generate)]
-pub fn generate_instance(description: &DataDescription) -> GenerationResult {
-    GenerationResult(generate_inner(description))
+pub fn generate_instance(description: &DataDescription) -> Result<Value, EvaluationError> {
+    generate_inner(description)
 }
 
 pub fn checked_from_value<T: FromValue>(value: &Value) -> Result<T, DescriptionError> {
@@ -413,10 +400,7 @@ fn checked_from_value_inner<T: FromValue>(
     } else {
         rune::from_value(value.to_owned())
     };
-    res.map_err(|e| {
-        println!("{:?}", e);
-        DescriptionError::ConversionError(type_name::<T>().to_owned(), line)
-    })
+    res.map_err(|_| DescriptionError::ConversionError(type_name::<T>().to_owned(), line))
 }
 
 fn range_impl(
@@ -630,47 +614,6 @@ fn try_build_description_inner(
     }
 }
 
-pub fn fix_line_number(err: DescriptionError, source: &Source) -> DescriptionError {
-    match err {
-        DescriptionError::InvalidRangeStart(Some(pos)) => {
-            DescriptionError::InvalidRangeStart(Some(source.pos_to_utf8_linecol(pos).0 + 1))
-        }
-        DescriptionError::InvalidRangeEnd(Some(pos)) => {
-            DescriptionError::InvalidRangeEnd(Some(source.pos_to_utf8_linecol(pos).0 + 1))
-        }
-        DescriptionError::UnsupportedType(Some(pos)) => {
-            DescriptionError::UnsupportedType(Some(source.pos_to_utf8_linecol(pos).0 + 1))
-        }
-        DescriptionError::NoValueToChooseFrom(Some(pos)) => {
-            DescriptionError::NoValueToChooseFrom(Some(source.pos_to_utf8_linecol(pos).0 + 1))
-        }
-        DescriptionError::MinMaxTypeMismatch(Some(pos)) => {
-            DescriptionError::MinMaxTypeMismatch(Some(source.pos_to_utf8_linecol(pos).0 + 1))
-        }
-        DescriptionError::InvalidProbability(p, Some(pos)) => {
-            DescriptionError::InvalidProbability(p, Some(source.pos_to_utf8_linecol(pos).0 + 1))
-        }
-        DescriptionError::CountMustBeNonNegative(Some(pos)) => {
-            DescriptionError::CountMustBeNonNegative(Some(source.pos_to_utf8_linecol(pos).0 + 1))
-        }
-        DescriptionError::ConversionError(s, Some(pos)) => {
-            DescriptionError::ConversionError(s, Some(source.pos_to_utf8_linecol(pos).0 + 1))
-        }
-        DescriptionError::InvalidRangeStart(None) => DescriptionError::InvalidRangeStart(None),
-        DescriptionError::InvalidRangeEnd(None) => DescriptionError::InvalidRangeEnd(None),
-        DescriptionError::UnsupportedType(None) => DescriptionError::UnsupportedType(None),
-        DescriptionError::NoValueToChooseFrom(None) => DescriptionError::NoValueToChooseFrom(None),
-        DescriptionError::MinMaxTypeMismatch(None) => DescriptionError::MinMaxTypeMismatch(None),
-        DescriptionError::InvalidProbability(p, None) => {
-            DescriptionError::InvalidProbability(p, None)
-        }
-        DescriptionError::CountMustBeNonNegative(None) => {
-            DescriptionError::CountMustBeNonNegative(None)
-        }
-        DescriptionError::ConversionError(s, None) => DescriptionError::ConversionError(s, None),
-    }
-}
-
 pub fn try_build_description(
     value: &Value,
     line: Option<usize>,
@@ -714,13 +657,9 @@ fn optional(p: Value, value: Value) -> Marker {
 }
 
 #[rune::function]
-fn make_description(this: Value, pos: usize) -> Result<DataDescription, DescriptionError> {
+#[expect(clippy::needless_pass_by_value)]
+fn __to_description(this: Value, pos: usize) -> Result<DataDescription, DescriptionError> {
     try_build_description(&this, Some(pos))
-}
-
-#[rune::function]
-fn to_description(this: Value) -> Result<DataDescription, DescriptionError> {
-    try_build_description(&this, None)
 }
 
 fn bit_or(left: Object, right: Value) -> Marker {
@@ -767,7 +706,7 @@ fn mul_alpha(_: Alpha, len: Value) -> Marker {
 #[derive(Any, ToConstValue)]
 struct Alpha {}
 
-pub fn module() -> Result<Module, ContextError> {
+pub fn module(source: Source) -> Result<Module, ContextError> {
     let mut m = Module::with_item(["rugen"])?;
     m.ty::<Marker>()?;
     m.ty::<DataDescription>()?;
@@ -775,11 +714,12 @@ pub fn module() -> Result<Module, ContextError> {
 
     m.macro_meta(describe)?;
 
+    m.function("__get_line", move |s: usize| {
+        source.pos_to_utf8_linecol(s).0 + 1
+    })
+    .build()?;
     m.constant("ALPHA", Alpha {}).build()?;
-    m.function_meta(make_description)?;
-    m.function_meta(to_description)?;
-    m.function_meta(generate_instance)?;
-    m.function_meta(generate_fn)?;
+    m.function_meta(__to_description)?;
     m.function_meta(bool)?;
     m.function_meta(string)?;
     m.function_meta(optional)?;

@@ -79,10 +79,7 @@ To try this example locally, make sure you have rugen-cli installed, then either
 
 ## Implicit Example
 
-Now, lets have a look at the implicit way of describing data. Normally, you would use the `describe` function like in the example before,
-but because our CLI is only meant execute data descriptions, we can just return a rune object and the CLI will automatically call `describe` on it
-for us. Just keep in mind that you when you use `RuGen` as a library, you either need to add the `describe` call to your rune scripts or call it
-yourself when you get the result of the script execution.
+Now, lets have a look at the implicit way of describing data.
 
 As you can see below, most of the functions from the first example are gone. This is because we know what type of almost every value and
 inside the CLI or by passing data to describe, we know that the data should be interpreted as a data description and not concrete data.
@@ -95,20 +92,23 @@ Especially if you always use a lower and an upper limit in a range (`lower_limit
 data as JSON, so there is no need to have the limits from the ranges *AND* the limits from the data type at the same time.
 
 ```rs
-use rugen as r;
+use rugen::ALPHA;
 
 pub fn main() {
-    #{
+     rugen::describe! {
         asdf: 1..10,
-        values: 5.values(55.0..128.0),
+        values: #{ //
+            fixed: (55.0..128.0) * 5,
+            variable: (55.0..128.0) * (2..8),
+        },
         range_from: 100..,
         range_to: ..100,
-        choice: r::choose([
-            #{ A: 100..=200 },
-            #{ B: -100..100 },
-            #{ C: 0.5..2.5 },
-            #{ D: r::string(10) },
-        ]),
+        choice: #{ A: 100..=200 }
+              | #{ B: -100..100 }
+              | #{ C: 0.5..2.5 }
+              | #{ D: ALPHA * 10 },
+        string: ALPHA * 10,
+        string_var: ALPHA * (5..15),
     }
 }
 ```
@@ -127,7 +127,7 @@ To try this example locally, make sure you have rugen-cli installed, then either
 
 ```rs
 // converts a possibly recursive value into the corresponding DataDescription
-rugen::describe(value: rune::Value) -> DataDescription;
+rugen::describe!{  } -> DataDescription;
 
 // creates a description that evaluates to a random boolean
 rugen::bool() -> DataDescription;

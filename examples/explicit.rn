@@ -1,23 +1,20 @@
 use rugen as r;
 pub fn main() {
-    let description = r::to_description(
-        #{
-            asdf: r::range(1, 10),
-            values: #{ //
-                fixed: 5.values(r::range(55.0, 128.0)),
-                variable: r::values(r::range(2, 8), r::range(55.0, 128.0)),
-            },
-            choice: r::choose(
-                [
-                    #{ A: r::range(100, 200) },
-                    #{ B: r::range(-100, 100) },
-                    #{ C: r::range(0.5, 2.5) },
-                    #{ D: r::string(10) },
-                ],
-            ),
-            string: r::string(10),
-            string_var: r::string(5..15),
+    rugen::describe! {
+        asdf: r::range(1, 10),
+        values: #{ //
+            fixed: 5.values(r::range(55.0, 128.0)),
+            variable: r::values(r::range(2, 8), r::range(55.0, 128.0)),
         },
-    )?;
-    description.generate()?
+        choice: r::choose(
+            [
+                #{ A: r::range(100, 200) },
+                #{ B: r::range(-100, 100) },
+                #{ C: r::range(0.5, 2.5) },
+                #{ D: r::string(10) },
+            ],
+        ),
+        string: r::string(10),
+        string_var: r::string(5..15),
+    }
 }

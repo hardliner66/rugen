@@ -2,10 +2,10 @@ use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use rugen::{
-    DataDescription, DescriptionError, GenerationResult, module,
+    DataDescription, DescriptionError, module,
     rune::{
         Diagnostics, Source, Sources, Vm,
-        alloc::Result,
+        alloc::{Result, clone::TryClone},
         termcolor::{ColorChoice, StandardStream},
     },
 };
@@ -32,9 +32,10 @@ enum Command {
 
 fn generate(pretty: bool, script: &PathBuf, output: Option<PathBuf>) -> anyhow::Result<()> {
     let mut context = rune_modules::default_context()?;
-    context.install(module()?)?;
     let mut sources = Sources::new();
-    sources.insert(Source::from_path(script)?)?;
+    let source = Source::from_path(script)?;
+    context.install(module(source.try_clone()?)?)?;
+    sources.insert(source)?;
     let mut diagnostics = Diagnostics::new();
 
     let result = rugen::rune::prepare(&mut sources)
@@ -57,13 +58,11 @@ fn generate(pretty: bool, script: &PathBuf, output: Option<PathBuf>) -> anyhow::
         string_result
     } else {
         let value = if let Ok(value) = rugen::rune::from_value::<DataDescription>(&result) {
-            rugen::generate(&value).try_into()?
+            rugen::generate(&value)?
         } else if let Ok(value) =
             rugen::rune::from_value::<Result<DataDescription, DescriptionError>>(&result)
         {
-            rugen::generate(&value?).try_into()?
-        } else if let Ok(value) = rugen::rune::from_value::<GenerationResult>(&result) {
-            value.try_into()?
+            rugen::generate(&value?)?
         } else {
             result
         };
