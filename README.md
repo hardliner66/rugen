@@ -68,7 +68,7 @@ pub fn main() {
                 r::object(#{ D: r::string(10) }),
             ],
         ),
-    }.generate()?
+    }
 }
 ```
 
